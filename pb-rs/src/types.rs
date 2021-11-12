@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
-use log::{debug, warn};
+use log::debug;
 
 use crate::errors::{Error, Result};
 use crate::keywords::sanitize_keyword;
@@ -58,20 +58,6 @@ impl MessageIndex {
             .skip(1)
             .fold(first_message, |cur, next| {
                 cur.and_then(|msg| msg.messages.get(*next))
-            })
-            .expect("Message index not found")
-    }
-
-    fn get_message_mut<'a>(&self, desc: &'a mut FileDescriptor) -> &'a mut Message {
-        let first_message = self
-            .indexes
-            .first()
-            .and_then(move |i| desc.messages.get_mut(*i));
-        self.indexes
-            .iter()
-            .skip(1)
-            .fold(first_message, |cur, next| {
-                cur.and_then(|msg| msg.messages.get_mut(*next))
             })
             .expect("Message index not found")
     }
@@ -282,32 +268,26 @@ impl FieldType {
         })
     }
 
-    /// Returns the relevant function to read the data, both for regular and Cow wrapped
-    fn read_fn(&self, desc: &FileDescriptor) -> Result<(String, String)> {
+    /// Returns the relevant function to read the data
+    fn read_fn(&self, desc: &FileDescriptor) -> Result<String> {
         Ok(match *self {
             FieldType::Message(ref msg) => {
                 let m = msg.get_message(desc);
-                let m = format!(
+                format!(
                     "r.read_message::<{}{}>(bytes)?",
                     m.get_modules(desc),
                     m.name
-                );
-                (m.clone(), m)
+                )
             }
-            FieldType::String_ => { // REVIEW
-                let m = format!("r.read_{}(bytes)", self.proto_type());
-                let vec = format!("{}?.to_owned()", m);
-                (m, vec)
+            FieldType::String_ => {
+                format!("r.read_{}(bytes)", self.proto_type())
             }
-            FieldType::Bytes_ => { // REVIEW
-                let m = format!("r.read_{}(bytes)", self.proto_type());
-                let vec = format!("{}?.to_owned()", m);
-                (m, vec)
+            FieldType::Bytes_ => {
+                format!("r.read_{}(bytes)", self.proto_type())
             }
             FieldType::MessageOrEnum(_) => unreachable!("Message / Enum not resolved"),
             _ => {
-                let m = format!("r.read_{}(bytes)?", self.proto_type());
-                (m.clone(), m)
+                format!("r.read_{}(bytes)?", self.proto_type())
             }
         })
     }
@@ -334,7 +314,7 @@ impl FieldType {
         }
     }
 
-    fn get_write(&self, s: &str, boxed: bool) -> String {
+    fn get_write(&self, s: &str) -> String {
         match *self {
             FieldType::Enum(_) => format!("write_enum(*{} as i32)", s),
 
@@ -355,7 +335,6 @@ impl FieldType {
             FieldType::String_ => format!("write_string(&**{})", s), // REVIEW
             FieldType::Bytes_ => format!("write_bytes(&**{})", s), // REVIEW
 
-            FieldType::Message(_) if boxed => format!("write_message(&**{})", s),
             FieldType::Message(_) => format!("write_message({})", s),
 
             FieldType::MessageOrEnum(_) => unreachable!("Message / Enum not resolved"),
@@ -371,7 +350,6 @@ pub struct Field {
     pub number: i32,
     pub default: Option<String>,
     pub packed: Option<bool>,
-    pub boxed: bool,
     pub deprecated: bool,
     pub max_length: Option<u32>,
 }
@@ -439,7 +417,6 @@ impl Field {
         write!(w, "    pub {}: ", self.name)?;
         let rust_type = self.typ.rust_type(desc)?;
         match self.frequency {
-            _ if self.boxed => writeln!(w, "Option<Box<{}>>,", rust_type)?,
             Frequency::Optional
                 if desc.syntax == Syntax::Proto2 && self.default.is_none()
                     || self.typ.message().is_some() =>
@@ -462,22 +439,21 @@ impl Field {
             return Ok(());
         }
 
-        let (val, val_cow) = self.typ.read_fn(desc)?;
+        let val = self.typ.read_fn(desc)?;
         let name = &self.name;
         write!(w, "                Ok({}) => ", self.tag())?;
         match self.frequency {
-            _ if self.boxed => writeln!(w, "msg.{} = Some(Box::new({})),", name, val)?,
             Frequency::Optional
                 if desc.syntax == Syntax::Proto2 && self.default.is_none()
                     || self.typ.message().is_some() =>
             {
-                writeln!(w, "msg.{} = Some({}),", name, val_cow)?
+                writeln!(w, "msg.{} = Some({}),", name, val)?
             }
             Frequency::Required | Frequency::Optional => {
-                writeln!(w, "msg.{} = {},", name, val_cow)?
+                writeln!(w, "msg.{} = {},", name, val)?
             }
             Frequency::Repeated if self.packed() && self.max_length.is_some() => {
-                writeln!(w, "msg.{} = r.read_packed_vec(bytes, |r, bytes| Ok({}))?,", name, val)?;
+                writeln!(w, "msg.{} = r.read_packed_heapless_vec(bytes, |r, bytes| Ok({}))?,", name, val)?;
             }
             Frequency::Repeated if self.packed() && self.typ.is_fixed_size() => {
                 writeln!(w, "msg.{} = r.read_packed_fixed(bytes)?.into(),", name)?;
@@ -486,10 +462,10 @@ impl Field {
                 writeln!(
                     w,
                     "msg.{} = r.read_packed(bytes, |r, bytes| Ok({}))?,",
-                    name, val_cow
+                    name, val
                 )?;
             }
-            Frequency::Repeated => writeln!(w, "msg.{}.push({}),", name, val_cow)?,
+            Frequency::Repeated => writeln!(w, "msg.{}.push({}),", name, val)?,
         }
         Ok(())
     }
@@ -605,7 +581,7 @@ impl Field {
                              self.{} {{ w.write_with_tag({}, |w| w.{})?; }}",
                             self.name,
                             self.tag(),
-                            self.typ.get_write("s", self.boxed)
+                            self.typ.get_write("s")
                         )?;
                     }
                     Some(d) => {
@@ -616,7 +592,7 @@ impl Field {
                             d,
                             self.tag(),
                             self.typ
-                                .get_write(&format!("&self.{}", self.name), self.boxed)
+                                .get_write(&format!("&self.{}", self.name))
                         )?;
                     }
                 }
@@ -629,7 +605,7 @@ impl Field {
                         self.name,
                         self.tag(),
                         self.typ
-                            .get_write(&format!("&self.{}", self.name), self.boxed)
+                            .get_write(&format!("&self.{}", self.name))
                     )?;
                 }
                 _ => {
@@ -643,7 +619,7 @@ impl Field {
                         ),
                         self.tag(),
                         self.typ
-                            .get_write(&format!("&self.{}", self.name), self.boxed)
+                            .get_write(&format!("&self.{}", self.name))
                     )?;
                 }
             },
@@ -653,7 +629,7 @@ impl Field {
                     "        w.write_with_tag({}, |w| w.{})?;",
                     self.tag(),
                     self.typ
-                        .get_write(&format!("&self.{}", self.name), self.boxed)
+                        .get_write(&format!("&self.{}", self.name))
                 )?;
             }
             Frequency::Repeated if self.packed() && self.typ.is_fixed_size() => writeln!(
@@ -667,7 +643,7 @@ impl Field {
                 "        w.write_packed_with_tag({}, &self.{}, |w, m| w.{}, &|m| {})?;",
                 self.tag(),
                 self.name,
-                self.typ.get_write("m", self.boxed),
+                self.typ.get_write("m"),
                 self.typ.get_size("m")
             )?,
             Frequency::Repeated => {
@@ -676,7 +652,7 @@ impl Field {
                     "        for s in &self.{} {{ w.write_with_tag({}, |w| w.{})?; }}",
                     self.name,
                     self.tag(),
-                    self.typ.get_write("s", self.boxed)
+                    self.typ.get_write("s")
                 )?;
             }
         }
@@ -770,7 +746,7 @@ impl Message {
         self.write_impl_message_write(w, desc, config)?;
 
         if config.gen_info {
-            self.write_impl_message_info(w, desc, config)?;
+            self.write_impl_message_info(w, desc)?;
             writeln!(w)?;
         }
 
@@ -852,7 +828,6 @@ impl Message {
         &self,
         w: &mut W,
         desc: &FileDescriptor,
-        config: &Config,
     ) -> Result<()> {
         let mut ignore = Vec::new();
         ignore.push(self.index.clone());
@@ -1434,11 +1409,7 @@ impl OneOf {
             }
 
             let rust_type = f.typ.rust_type(desc)?;
-            if f.boxed {
-                writeln!(w, "    {}(Box<{}>),", f.name, rust_type)?;
-            } else {
-                writeln!(w, "    {}({}),", f.name, rust_type)?;
-            }
+            writeln!(w, "    {}({}),", f.name, rust_type)?;
         }
         writeln!(w, "    None,")?;
         writeln!(w, "}}")?;
@@ -1511,30 +1482,17 @@ impl OneOf {
 
     fn write_match_tag<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
         for f in self.fields.iter().filter(|f| !f.deprecated || config.add_deprecated_fields) {
-            let (val, val_cow) = f.typ.read_fn(desc)?;
-            if f.boxed {
-                writeln!(
-                    w,
-                    "                Ok({}) => msg.{} = {}OneOf{}::{}(Box::new({})),",
-                    f.tag(),
-                    self.name,
-                    self.get_modules(desc),
-                    self.name,
-                    f.name,
-                    val
-                )?;
-            } else {
-                writeln!(
-                    w,
-                    "                Ok({}) => msg.{} = {}OneOf{}::{}({}),",
-                    f.tag(),
-                    self.name,
-                    self.get_modules(desc),
-                    self.name,
-                    f.name,
-                    val_cow
-                )?;
-            }
+            let val = f.typ.read_fn(desc)?;
+            writeln!(
+                w,
+                "                Ok({}) => msg.{} = {}OneOf{}::{}({}),",
+                f.tag(),
+                self.name,
+                self.get_modules(desc),
+                self.name,
+                f.name,
+                val
+            )?;
         }
         Ok(())
     }
@@ -1585,7 +1543,7 @@ impl OneOf {
                 self.name,
                 f.name,
                 f.tag(),
-                f.typ.get_write("m", f.boxed)
+                f.typ.get_write("m")
             )?;
         }
         writeln!(
@@ -1645,7 +1603,7 @@ impl FileDescriptor {
         }
 
         desc.resolve_types()?;
-        desc.break_cycles(true)?;
+        desc.break_cycles()?;
         desc.sanity_checks()?;
         desc.set_defaults()?;
         desc.sanitize_names();
@@ -1854,7 +1812,7 @@ impl FileDescriptor {
     }
 
     /// Breaks cycles by adding boxes when necessary
-    fn break_cycles(&mut self, error_cycle: bool) -> Result<()> {
+    fn break_cycles(&mut self) -> Result<()> {
         // get strongly connected components
         let sccs = self.sccs();
 
@@ -1862,7 +1820,6 @@ impl FileDescriptor {
             scc.iter()
                 .map(|m| m.get_message(desc))
                 .flat_map(|m| m.all_fields())
-                .filter(|f| !f.boxed)
                 .filter_map(|f| f.typ.message())
                 .any(|m| scc.contains(m))
         }
@@ -1890,48 +1847,13 @@ impl FileDescriptor {
                 for cycle in cycles {
                     let cycle = &scc[i..i + cycle + 1];
                     debug!("cycle: {:?}", &cycle);
-                    for v in cycle {
-                        for f in v
-                            .get_message_mut(self)
-                            .all_fields_mut()
-                            .filter(|f| f.frequency == Frequency::Optional)
-                            .filter(|f| f.typ.message().map_or(false, |m| cycle.contains(m)))
-                        {
-                            f.boxed = true;
-                        }
-                    }
                     if is_cycle(cycle, self) {
-                        if error_cycle {
-                            return Err(Error::Cycle(
-                                cycle
-                                    .iter()
-                                    .map(|m| m.get_message(self).name.clone())
-                                    .collect(),
-                            ));
-                        } else {
-                            for v in cycle {
-                                warn!(
-                                    "Unsound proto file would result in infinite size Messages.\n\
-                                     Cycle detected in messages {:?}.\n\
-                                     Modifying required fields into optional fields",
-                                    cycle
-                                        .iter()
-                                        .map(|m| &m.get_message(self).name)
-                                        .collect::<Vec<_>>()
-                                );
-                                for f in v
-                                    .get_message_mut(self)
-                                    .all_fields_mut()
-                                    .filter(|f| f.frequency == Frequency::Required)
-                                    .filter(|f| {
-                                        f.typ.message().map_or(false, |m| cycle.contains(m))
-                                    })
-                                {
-                                    f.boxed = true;
-                                    f.frequency = Frequency::Optional;
-                                }
-                            }
-                        }
+                        return Err(Error::Cycle(
+                            cycle
+                                .iter()
+                                .map(|m| m.get_message(self).name.clone())
+                                .collect(),
+                        ));
                     }
                 }
             }

@@ -263,7 +263,6 @@ named!(
                     .iter()
                     .find(|&&(k, _)| k == "packed")
                     .map(|&(_, v)| str::FromStr::from_str(v).expect("Cannot parse Packed value")),
-                boxed: false,
                 typ: typ,
                 deprecated: key_vals
                     .iter()

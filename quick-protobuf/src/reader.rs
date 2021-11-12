@@ -15,9 +15,9 @@ use std::io::Read;
 use std::path::Path;
 
 #[cfg(not(feature = "std"))]
-extern crate alloc;
+use heapless::Vec;
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use heapless::String;
 
 use crate::errors::{Error, Result};
 use crate::message::MessageRead;
@@ -379,6 +379,22 @@ impl BytesReader {
         })
     }
 
+    /// Reads packed repeated field (heapless::Vec<A>)
+    // REVIEW
+    #[cfg(not(feature = "std"))]
+    pub fn read_packed_heapless_vec<'a, M, F>(&mut self, bytes: &'a [u8], mut read: F) -> Result<Vec<M, N>>
+    where
+        F: FnMut(&mut BytesReader, &'a [u8]) -> Result<M>,
+    {
+        self.read_len_varint(bytes, |r, b| {
+            let mut v = Vec::new();
+            while !r.is_eof() {
+                v.push(read(r, b)?);
+            }
+            Ok(v)
+        })
+    }
+
     /// Reads packed repeated field where M can directly be transmutted from raw bytes
     ///
     /// Note: packed field are stored as a variable length chunk of data, while regular repeated
@@ -541,6 +557,7 @@ impl BytesReader {
 ///     println!("Found {} foos and {} bars!", foobar.foos.len(), foobar.bars.len());
 /// }
 /// ```
+#[cfg(feature = "std")]
 pub struct Reader {
     buffer: Vec<u8>,
     inner: BytesReader,

@@ -1,4 +1,4 @@
-use crate::types::{FileDescriptor, Frequency, MessageIndex};
+use crate::types::{FileDescriptor, MessageIndex};
 use std::cmp::min;
 use std::collections::HashMap;
 
@@ -25,7 +25,6 @@ fn scc(
     for &v in vertices[u]
         .get_message(desc)
         .all_fields()
-        .filter(|f| !f.boxed && f.frequency != Frequency::Repeated)
         .filter_map(|f| f.typ.message())
         .filter_map(|m| ids.get(m))
     {

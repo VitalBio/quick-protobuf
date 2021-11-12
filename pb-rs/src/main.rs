@@ -128,12 +128,8 @@ fn run() -> Result<(), Error> {
     )?
     .single_module(matches.is_present("SINGLE_MOD"))
     .no_output(matches.is_present("NO_OUTPUT"))
-    .error_cycle(matches.is_present("CYCLE"))
     .headers(!matches.is_present("NO_HEADERS"))
-    .dont_use_cow(matches.is_present("DONT_USE_COW"))
     .custom_struct_derive(custom_struct_derive)
-    .nostd(matches.is_present("NOSTD"))
-    .hashbrown(matches.is_present("HASHBROWN"))
     .gen_info(matches.is_present("GEN_INFO"))
     .custom_repr(custom_repr)
     .owned(matches.is_present("OWNED"))
