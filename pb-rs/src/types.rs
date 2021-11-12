@@ -2001,6 +2001,7 @@ impl FileDescriptor {
         writeln!(w, "#![allow(unused_imports)]")?;
         writeln!(w, "#![allow(unknown_lints)]")?;
         writeln!(w, "#![allow(clippy::all)]")?;
+        writeln!(w, "#![no_std]")?;
 
         if config.add_deprecated_fields {
             writeln!(w, "#![allow(deprecated)]")?;
