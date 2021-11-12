@@ -56,14 +56,10 @@ pub struct ConfigBuilder {
     include_paths: Vec<PathBuf>,
     single_module: bool,
     no_output: bool,
-    error_cycle: bool,
     headers: bool,
-    dont_use_cow: bool,
     custom_struct_derive: Vec<String>,
     custom_repr: Option<String>,
     owned: bool,
-    nostd: bool,
-    hashbrown: bool,
     gen_info: bool,
     add_deprecated_fields: bool,
 }
@@ -136,12 +132,6 @@ impl ConfigBuilder {
         self
     }
 
-    /// Error out if recursive messages do not have optional fields
-    pub fn error_cycle(mut self, val: bool) -> Self {
-        self.error_cycle = val;
-        self
-    }
-
     /// Enable module comments and module attributes in generated file (default = true)
     pub fn headers(mut self, val: bool) -> Self {
         self.headers = val;
@@ -160,29 +150,9 @@ impl ConfigBuilder {
         self
     }
 
-    /// Use `Cow<_,_>` for Strings and Bytes
-    pub fn dont_use_cow(mut self, val: bool) -> Self {
-        self.dont_use_cow = val;
-        self
-    }
-
     /// Generate Owned structs when the proto struct has a lifetime
     pub fn owned(mut self, val: bool) -> Self {
         self.owned = val;
-        self
-    }
-
-    /// Generate `#![no_std]` compliant code
-    pub fn nostd(mut self, val: bool) -> Self {
-        self.nostd = val;
-        self
-    }
-
-    /// Use hashbrown as `HashMap` implementation instead of [std::collections::HashMap] or
-    /// [alloc::collections::BTreeMap](https://doc.rust-lang.org/alloc/collections/btree_map/struct.BTreeMap.html)
-    /// in a `no_std` environment
-    pub fn hashbrown(mut self, val: bool) -> Self {
-        self.hashbrown = val;
         self
     }
 
@@ -219,16 +189,12 @@ impl ConfigBuilder {
                     import_search_path: self.include_paths.clone(),
                     single_module: self.single_module,
                     no_output: self.no_output,
-                    error_cycle: self.error_cycle,
                     headers: self.headers,
-                    dont_use_cow: self.dont_use_cow, //Change this to true to not use cow with ./generate.sh for v2 and v3 tests
                     custom_struct_derive: self.custom_struct_derive.clone(),
                     custom_repr: self.custom_repr.clone(),
                     custom_rpc_generator: Box::new(|_, _| Ok(())),
                     custom_includes: Vec::new(),
                     owned: self.owned,
-                    nostd: self.nostd,
-                    hashbrown: self.hashbrown,
                     gen_info: self.gen_info,
                     add_deprecated_fields: self.add_deprecated_fields,
                 }

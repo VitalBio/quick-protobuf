@@ -19,6 +19,8 @@ pub enum Error {
     OutputMultipleInputs,
     /// Invalid message
     InvalidMessage(String),
+    /// Unsupported message
+    UnsupportedMessage(String),
     /// Varint decoding error
     InvalidImport(String),
     /// Empty read
@@ -68,6 +70,12 @@ impl std::fmt::Display for Error {
                 f,
                 "Message checks errored: {}\r\n\
                 Proto definition might be invalid or something got wrong in the parsing",
+                msg
+            ),
+            Error::UnsupportedMessage(msg) => write!(
+                f,
+                "Message checks errored: {}\r\n\
+                Proto definition includes unsupported type",
                 msg
             ),
             Error::InvalidImport(imp) => write!(

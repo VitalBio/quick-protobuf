@@ -149,11 +149,17 @@ named!(
 );
 
 named!(
+    option_key<&str>,
+    alt_complete!(delimited!(tag!("("), word_ref, tag!(")"))
+                  | word_ref)
+);
+
+named!(
     key_val<(&str, &str)>,
     do_parse!(
         tag!("[")
             >> many0!(br)
-            >> key: word_ref
+            >> key: option_key
             >> many0!(br)
             >> tag!("=")
             >> many0!(br)
@@ -184,11 +190,10 @@ named!(
             tag!("fixed64") => { |_| FieldType::Fixed64 } |
             tag!("sfixed64") => { |_| FieldType::Sfixed64 } |
             tag!("bool") => { |_| FieldType::Bool } |
-            tag!("string") => { |_| FieldType::StringCow } |
-            tag!("bytes") => { |_| FieldType::BytesCow } |
+            tag!("string") => { |_| FieldType::String_ } |
+            tag!("bytes") => { |_| FieldType::Bytes_ } |
             tag!("float") => { |_| FieldType::Float } |
             tag!("double") => { |_| FieldType::Double } |
-            map_field => { |(k, v)| FieldType::Map(Box::new(k), Box::new(v)) } |
             word => { |w| FieldType::MessageOrEnum(w) })
 );
 
@@ -265,6 +270,12 @@ named!(
                     .find(|&&(k, _)| k == "deprecated")
                     .map_or(false, |&(_, v)| str::FromStr::from_str(v)
                         .expect("Cannot parse Deprecated value")),
+                max_length: key_vals
+                    .iter()
+                    .find(|&&(k, _)| k == "rust_max_length" || k == "rust_ext.rust_max_length")
+                    .map(|&(_, v)| v
+                        .parse::<u32>()
+                        .expect("Cannot parse rust_max_length value")),
             })
     )
 );
@@ -582,14 +593,6 @@ mod test {
         if let ::nom::IResult::Done(_, mess) = mess {
             assert_eq!(1, mess.fields.len());
             match mess.fields[0].typ {
-                FieldType::Map(ref key, ref value) => match (&**key, &**value) {
-                    (&FieldType::String_, &FieldType::Int32) => (),
-                    (&FieldType::StringCow, &FieldType::Int32) => (),
-                    _ => panic!(
-                        "Expecting Map<String, Int32> found Map<{:?}, {:?}>",
-                        key, value
-                    ),
-                },
                 ref f => panic!("Expecting map, got {:?}", f),
             }
         } else {
@@ -683,5 +686,17 @@ mod test {
             }
             other => panic!("Could not parse RPC Function Declaration: {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_option_key_plain() {
+        let s = option_key("test".as_bytes()).unwrap().1;
+        assert_eq!("test", s);
+    }
+
+    #[test]
+    fn test_option_key_parens() {
+        let s = option_key("(test)".as_bytes()).unwrap().1;
+        assert_eq!("test", s);
     }
 }
