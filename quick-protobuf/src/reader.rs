@@ -7,13 +7,6 @@
 //!
 //! It is advised, for convenience to directly work with a `Reader`.
 
-#[cfg(feature = "std")]
-use std::fs::File;
-#[cfg(feature = "std")]
-use std::io::Read;
-#[cfg(feature = "std")]
-use std::path::Path;
-
 use crate::errors::{Error, Result};
 use crate::message::MessageRead;
 
@@ -86,13 +79,11 @@ impl BytesReader {
     }
 
     /// Reads next tag, `None` if all bytes have been read
-    #[cfg_attr(std, inline(always))]
     pub fn next_tag(&mut self, bytes: &[u8]) -> Result<u32> {
         self.read_varint32(bytes)
     }
 
     /// Reads the next byte
-    #[cfg_attr(std, inline(always))]
     pub fn read_u8(&mut self, bytes: &[u8]) -> Result<u8> {
         let b = bytes.get(self.start).ok_or(Error::UnexpectedEndOfBuffer)?;
         self.start += 1;
@@ -100,7 +91,6 @@ impl BytesReader {
     }
 
     /// Reads the next varint encoded u64
-    #[cfg_attr(std, inline(always))]
     pub fn read_varint32(&mut self, bytes: &[u8]) -> Result<u32> {
         let mut b = self.read_u8(bytes)?;
         if b & 0x80 == 0 {
@@ -144,7 +134,6 @@ impl BytesReader {
     }
 
     /// Reads the next varint encoded u64
-    #[cfg_attr(std, inline(always))]
     pub fn read_varint64(&mut self, bytes: &[u8]) -> Result<u64> {
         // part0
         let mut b = self.read_u8(bytes)?;
@@ -214,31 +203,26 @@ impl BytesReader {
     }
 
     /// Reads int32 (varint)
-    #[cfg_attr(std, inline)]
     pub fn read_int32(&mut self, bytes: &[u8]) -> Result<i32> {
         self.read_varint32(bytes).map(|i| i as i32)
     }
 
     /// Reads int64 (varint)
-    #[cfg_attr(std, inline)]
     pub fn read_int64(&mut self, bytes: &[u8]) -> Result<i64> {
         self.read_varint64(bytes).map(|i| i as i64)
     }
 
     /// Reads uint32 (varint)
-    #[cfg_attr(std, inline)]
     pub fn read_uint32(&mut self, bytes: &[u8]) -> Result<u32> {
         self.read_varint32(bytes)
     }
 
     /// Reads uint64 (varint)
-    #[cfg_attr(std, inline)]
     pub fn read_uint64(&mut self, bytes: &[u8]) -> Result<u64> {
         self.read_varint64(bytes)
     }
 
     /// Reads sint32 (varint)
-    #[cfg_attr(std, inline)]
     pub fn read_sint32(&mut self, bytes: &[u8]) -> Result<i32> {
         // zigzag
         let n = self.read_varint32(bytes)?;
@@ -246,7 +230,6 @@ impl BytesReader {
     }
 
     /// Reads sint64 (varint)
-    #[cfg_attr(std, inline)]
     pub fn read_sint64(&mut self, bytes: &[u8]) -> Result<i64> {
         // zigzag
         let n = self.read_varint64(bytes)?;
@@ -254,7 +237,6 @@ impl BytesReader {
     }
 
     /// Reads fixed64 (little endian u64)
-    #[cfg_attr(std, inline)]
     fn read_fixed<M, F: Fn(&[u8]) -> M>(&mut self, bytes: &[u8], len: usize, read: F) -> Result<M> {
         let v = read(
             &bytes
@@ -266,55 +248,46 @@ impl BytesReader {
     }
 
     /// Reads fixed64 (little endian u64)
-    #[cfg_attr(std, inline)]
     pub fn read_fixed64(&mut self, bytes: &[u8]) -> Result<u64> {
         self.read_fixed(bytes, 8, LE::read_u64)
     }
 
     /// Reads fixed32 (little endian u32)
-    #[cfg_attr(std, inline)]
     pub fn read_fixed32(&mut self, bytes: &[u8]) -> Result<u32> {
         self.read_fixed(bytes, 4, LE::read_u32)
     }
 
     /// Reads sfixed64 (little endian i64)
-    #[cfg_attr(std, inline)]
     pub fn read_sfixed64(&mut self, bytes: &[u8]) -> Result<i64> {
         self.read_fixed(bytes, 8, LE::read_i64)
     }
 
     /// Reads sfixed32 (little endian i32)
-    #[cfg_attr(std, inline)]
     pub fn read_sfixed32(&mut self, bytes: &[u8]) -> Result<i32> {
         self.read_fixed(bytes, 4, LE::read_i32)
     }
 
     /// Reads float (little endian f32)
-    #[cfg_attr(std, inline)]
     pub fn read_float(&mut self, bytes: &[u8]) -> Result<f32> {
         self.read_fixed(bytes, 4, LE::read_f32)
     }
 
     /// Reads double (little endian f64)
-    #[cfg_attr(std, inline)]
     pub fn read_double(&mut self, bytes: &[u8]) -> Result<f64> {
         self.read_fixed(bytes, 8, LE::read_f64)
     }
 
     /// Reads bool (varint, check if == 0)
-    #[cfg_attr(std, inline)]
     pub fn read_bool(&mut self, bytes: &[u8]) -> Result<bool> {
         self.read_varint32(bytes).map(|i| i != 0)
     }
 
     /// Reads enum, encoded as i32
-    #[cfg_attr(std, inline)]
     pub fn read_enum<E: From<i32>>(&mut self, bytes: &[u8]) -> Result<E> {
         self.read_int32(bytes).map(|e| e.into())
     }
 
     /// First reads a varint and use it as size to read a generic object
-    #[cfg_attr(std, inline(always))]
     fn read_len_varint<'a, M, F>(&mut self, bytes: &'a [u8], read: F) -> Result<M>
     where
         F: FnMut(&mut BytesReader, &'a [u8]) -> Result<M>,
@@ -324,7 +297,6 @@ impl BytesReader {
     }
 
     /// Reads a certain number of bytes specified by len
-    #[cfg_attr(std, inline(always))]
     fn read_len<'a, M, F>(&mut self, bytes: &'a [u8], mut read: F, len: usize) -> Result<M>
     where
         F: FnMut(&mut BytesReader, &'a [u8]) -> Result<M>,
@@ -337,49 +309,9 @@ impl BytesReader {
         Ok(v)
     }
 
-    /// Reads packed repeated field (Vec<M>)
-    ///
-    /// Note: packed field are stored as a variable length chunk of data, while regular repeated
-    /// fields behaves like an iterator, yielding their tag everytime
-    #[cfg_attr(std, inline)]
-    pub fn read_packed<'a, M, F>(&mut self, bytes: &'a [u8], mut read: F) -> Result<Vec<M>>
-    where
-        F: FnMut(&mut BytesReader, &'a [u8]) -> Result<M>,
-    {
-        self.read_len_varint(bytes, |r, b| {
-            let mut v = Vec::new();
-            while !r.is_eof() {
-                v.push(read(r, b)?);
-            }
-            Ok(v)
-        })
-    }
-
-    /// Reads packed repeated field where M can directly be transmutted from raw bytes
-    ///
-    /// Note: packed field are stored as a variable length chunk of data, while regular repeated
-    /// fields behaves like an iterator, yielding their tag everytime
-    #[cfg_attr(std, inline)]
-    pub fn read_packed_fixed<'a, M>(&mut self, bytes: &'a [u8]) -> Result<&'a [M]> {
-        let len = self.read_varint32(bytes)? as usize;
-        if self.len() < len {
-            return Err(Error::UnexpectedEndOfBuffer);
-        }
-        let n = len / ::core::mem::size_of::<M>();
-        let slice = unsafe {
-            ::core::slice::from_raw_parts(
-                bytes.get_unchecked(self.start) as *const u8 as *const M,
-                n,
-            )
-        };
-        self.start += len;
-        Ok(slice)
-    }
-
     /// Reads a nested message
     ///
     /// First reads a varint and interprets it as the length of the message
-    #[cfg_attr(std, inline)]
     pub fn read_message<'a, M>(&mut self, bytes: &'a [u8]) -> Result<M>
     where
         M: MessageRead<'a>,
@@ -391,7 +323,6 @@ impl BytesReader {
     ///
     /// Reads just the message and does not try to read it's size first.
     ///  * 'len' - The length of the message to be read.
-    #[cfg_attr(std, inline)]
     pub fn read_message_by_len<'a, M>(&mut self, bytes: &'a [u8], len: usize) -> Result<M>
     where
         M: MessageRead<'a>,
@@ -400,7 +331,6 @@ impl BytesReader {
     }
 
     /// Reads a map item: (key, value)
-    #[cfg_attr(std, inline)]
     pub fn read_map<'a, K, V, F, G>(
         &mut self,
         bytes: &'a [u8],
@@ -429,7 +359,6 @@ impl BytesReader {
     }
 
     /// Reads unknown data, based on its tag value (which itself gives us the wire_type value)
-    #[cfg_attr(std, inline)]
     pub fn read_unknown(&mut self, bytes: &[u8], tag_value: u32) -> Result<()> {
         match (tag_value & 0x7) as u8 {
             WIRE_TYPE_VARINT => {
@@ -452,13 +381,11 @@ impl BytesReader {
     }
 
     /// Gets the remaining length of bytes not read yet
-    #[cfg_attr(std, inline(always))]
     pub fn len(&self) -> usize {
         self.end - self.start
     }
 
     /// Checks if `self.len == 0`
-    #[cfg_attr(std, inline(always))]
     pub fn is_eof(&self) -> bool {
         self.start == self.end
     }
@@ -466,113 +393,6 @@ impl BytesReader {
     /// Advance inner cursor to the end
     pub fn read_to_end(&mut self) {
         self.start = self.end;
-    }
-}
-
-/// A struct to read protobuf data
-///
-/// Contrary to `BytesReader`, this struct will own a buffer
-///
-/// # Examples
-///
-/// ```rust,should_panic
-/// # mod foo_bar {
-/// #     use quick_protobuf::{MessageRead, BytesReader, Result};
-/// #     pub struct Foo {}
-/// #     pub struct Bar {}
-/// #     pub struct FooBar { pub foos: Vec<Foo>, pub bars: Vec<Bar>, }
-/// #     impl<'a> MessageRead<'a> for FooBar {
-/// #         fn from_reader(_: &mut BytesReader, _: &[u8]) -> Result<Self> {
-/// #              Ok(FooBar { foos: vec![], bars: vec![] })
-/// #         }
-/// #     }
-/// # }
-///
-/// // FooBar is a message generated from a proto file
-/// // In particular it implements the `MessageRead` trait, containing a `from_reader` function.
-/// use foo_bar::FooBar;
-/// use quick_protobuf::Reader;
-///
-/// fn main() {
-///     // create a reader, which will parse the protobuf binary file and pop events
-///     // this reader will read the entire file into an internal buffer
-///     let mut reader = Reader::from_file("/path/to/binary/protobuf.bin")
-///         .expect("Cannot read input file");
-///
-///     // Use the generated module fns with the reader to convert your data into rust structs.
-///     //
-///     // Depending on your input file, the message can or not be prefixed with the encoded length
-///     // for instance, a *stream* which contains several messages generally split them using this
-///     // technique (see https://developers.google.com/protocol-buffers/docs/techniques#streaming)
-///     //
-///     // To read a message without a length prefix you can directly call `FooBar::from_reader`:
-///     // let foobar = reader.read(FooBar::from_reader).expect("Cannot read FooBar message");
-///     //
-///     // Else to read a length then a message, you can use:
-///     let foobar: FooBar = reader.read(|r, b| r.read_message(b))
-///         .expect("Cannot read FooBar message");
-///     // Reader::read_message uses `FooBar::from_reader` internally through the `MessageRead`
-///     // trait.
-///
-///     println!("Found {} foos and {} bars!", foobar.foos.len(), foobar.bars.len());
-/// }
-/// ```
-#[cfg(feature = "std")]
-pub struct Reader {
-    buffer: Vec<u8>,
-    inner: BytesReader,
-}
-
-impl Reader {
-    /// Creates a new `Reader`
-    #[cfg(feature = "std")]
-    pub fn from_reader<R: Read>(mut r: R, capacity: usize) -> Result<Reader> {
-        let mut buf = Vec::with_capacity(capacity);
-        unsafe {
-            buf.set_len(capacity);
-        }
-        buf.shrink_to_fit();
-        r.read_exact(&mut buf)?;
-        Ok(Reader::from_bytes(buf))
-    }
-
-    /// Creates a new `Reader` out of a file path
-    #[cfg(feature = "std")]
-    pub fn from_file<P: AsRef<Path>>(src: P) -> Result<Reader> {
-        let len = src.as_ref().metadata().unwrap().len() as usize;
-        let f = File::open(src)?;
-        Reader::from_reader(f, len)
-    }
-
-    /// Creates a new reader consuming the bytes
-    pub fn from_bytes(bytes: Vec<u8>) -> Reader {
-        let reader = BytesReader {
-            start: 0,
-            end: bytes.len(),
-        };
-        Reader {
-            buffer: bytes,
-            inner: reader,
-        }
-    }
-
-    /// Run a `BytesReader` dependent function
-    #[cfg_attr(std, inline)]
-    pub fn read<'a, M, F>(&'a mut self, mut read: F) -> Result<M>
-    where
-        F: FnMut(&mut BytesReader, &'a [u8]) -> Result<M>,
-    {
-        read(&mut self.inner, &self.buffer)
-    }
-
-    /// Gets the inner `BytesReader`
-    pub fn inner(&mut self) -> &mut BytesReader {
-        &mut self.inner
-    }
-
-    /// Gets the buffer used internally
-    pub fn buffer(&self) -> &[u8] {
-        &self.buffer
     }
 }
 

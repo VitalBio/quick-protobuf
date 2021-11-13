@@ -2,13 +2,6 @@
 //!
 //! Creates the struct and implements a reader
 
-#[cfg(feature = "std")]
-use std::fs::File;
-#[cfg(feature = "std")]
-use std::io::BufWriter;
-#[cfg(feature = "std")]
-use std::path::Path;
-
 use crate::errors::Result;
 use crate::reader::BytesReader;
 use crate::writer::{Writer, WriterBackend};
@@ -23,14 +16,6 @@ pub trait MessageWrite: Sized {
     /// Computes necessary binary size of self once serialized in protobuf
     fn get_size(&self) -> usize {
         0
-    }
-
-    /// Writes self into a file
-    #[cfg(feature = "std")]
-    fn write_file<P: AsRef<Path>>(&self, p: P) -> Result<()> {
-        let file = BufWriter::new(File::create(p)?);
-        let mut writer = Writer::new(file);
-        self.write_message(&mut writer)
     }
 }
 
