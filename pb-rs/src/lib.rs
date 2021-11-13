@@ -59,7 +59,6 @@ pub struct ConfigBuilder {
     headers: bool,
     custom_struct_derive: Vec<String>,
     custom_repr: Option<String>,
-    owned: bool,
     gen_info: bool,
     add_deprecated_fields: bool,
 }
@@ -150,12 +149,6 @@ impl ConfigBuilder {
         self
     }
 
-    /// Generate Owned structs when the proto struct has a lifetime
-    pub fn owned(mut self, val: bool) -> Self {
-        self.owned = val;
-        self
-    }
-
     /// Generate `MessageInfo` implementations
     pub fn gen_info(mut self, val: bool) -> Self {
         self.gen_info = val;
@@ -194,7 +187,6 @@ impl ConfigBuilder {
                     custom_repr: self.custom_repr.clone(),
                     custom_rpc_generator: Box::new(|_, _| Ok(())),
                     custom_includes: Vec::new(),
-                    owned: self.owned,
                     gen_info: self.gen_info,
                     add_deprecated_fields: self.add_deprecated_fields,
                 }

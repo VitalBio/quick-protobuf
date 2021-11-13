@@ -14,11 +14,6 @@ use std::io::Read;
 #[cfg(feature = "std")]
 use std::path::Path;
 
-#[cfg(not(feature = "std"))]
-use heapless::Vec;
-#[cfg(not(feature = "std"))]
-use heapless::String;
-
 use crate::errors::{Error, Result};
 use crate::message::MessageRead;
 
@@ -342,47 +337,12 @@ impl BytesReader {
         Ok(v)
     }
 
-    /// Reads bytes (Vec<u8>)
-    #[cfg_attr(std, inline)]
-    pub fn read_bytes<'a>(&mut self, bytes: &'a [u8]) -> Result<&'a [u8]> {
-        self.read_len_varint(bytes, |r, b| {
-            b.get(r.start..r.end)
-                .ok_or_else(|| Error::UnexpectedEndOfBuffer)
-        })
-    }
-
-    /// Reads string (String)
-    #[cfg_attr(std, inline)]
-    pub fn read_string<'a>(&mut self, bytes: &'a [u8]) -> Result<&'a str> {
-        self.read_len_varint(bytes, |r, b| {
-            b.get(r.start..r.end)
-                .ok_or_else(|| Error::UnexpectedEndOfBuffer)
-                .and_then(|x| ::core::str::from_utf8(x).map_err(|e| e.into()))
-        })
-    }
-
     /// Reads packed repeated field (Vec<M>)
     ///
     /// Note: packed field are stored as a variable length chunk of data, while regular repeated
     /// fields behaves like an iterator, yielding their tag everytime
     #[cfg_attr(std, inline)]
     pub fn read_packed<'a, M, F>(&mut self, bytes: &'a [u8], mut read: F) -> Result<Vec<M>>
-    where
-        F: FnMut(&mut BytesReader, &'a [u8]) -> Result<M>,
-    {
-        self.read_len_varint(bytes, |r, b| {
-            let mut v = Vec::new();
-            while !r.is_eof() {
-                v.push(read(r, b)?);
-            }
-            Ok(v)
-        })
-    }
-
-    /// Reads packed repeated field (heapless::Vec<A>)
-    // REVIEW
-    #[cfg(not(feature = "std"))]
-    pub fn read_packed_heapless_vec<'a, M, F>(&mut self, bytes: &'a [u8], mut read: F) -> Result<Vec<M, N>>
     where
         F: FnMut(&mut BytesReader, &'a [u8]) -> Result<M>,
     {

@@ -173,7 +173,6 @@ named!(
 named!(
     frequency<Frequency>,
     alt!(tag!("optional") => { |_| Frequency::Optional } |
-            tag!("repeated") => { |_| Frequency::Repeated } |
             tag!("required") => { |_| Frequency::Required } )
 );
 
@@ -190,8 +189,6 @@ named!(
             tag!("fixed64") => { |_| FieldType::Fixed64 } |
             tag!("sfixed64") => { |_| FieldType::Sfixed64 } |
             tag!("bool") => { |_| FieldType::Bool } |
-            tag!("string") => { |_| FieldType::String_ } |
-            tag!("bytes") => { |_| FieldType::Bytes_ } |
             tag!("float") => { |_| FieldType::Float } |
             tag!("double") => { |_| FieldType::Double } |
             word => { |w| FieldType::MessageOrEnum(w) })
@@ -269,12 +266,6 @@ named!(
                     .find(|&&(k, _)| k == "deprecated")
                     .map_or(false, |&(_, v)| str::FromStr::from_str(v)
                         .expect("Cannot parse Deprecated value")),
-                max_length: key_vals
-                    .iter()
-                    .find(|&&(k, _)| k == "rust_max_length" || k == "rust_ext.rust_max_length")
-                    .map(|&(_, v)| v
-                        .parse::<u32>()
-                        .expect("Cannot parse rust_max_length value")),
             })
     )
 );

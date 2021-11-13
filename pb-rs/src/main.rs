@@ -132,7 +132,6 @@ fn run() -> Result<(), Error> {
     .custom_struct_derive(custom_struct_derive)
     .gen_info(matches.is_present("GEN_INFO"))
     .custom_repr(custom_repr)
-    .owned(matches.is_present("OWNED"))
     .add_deprecated_fields(matches.is_present("ADD_DEPRECATED_FIELDS"));
 
     FileDescriptor::run(&compiler.build()).map_err(|e| e.into())

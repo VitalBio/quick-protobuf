@@ -35,7 +35,6 @@ impl Default for Syntax {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Frequency {
     Optional,
-    Repeated,
     Required,
 }
 
@@ -101,8 +100,6 @@ pub enum FieldType {
     Fixed64,
     Sfixed64,
     Double,
-    String_,
-    Bytes_,
     Message(MessageIndex),
     MessageOrEnum(String),
     Fixed32,
@@ -113,9 +110,7 @@ pub enum FieldType {
 impl FieldType {
     pub fn is_primitive(&self) -> bool {
         match *self {
-            FieldType::Message(_)
-            | FieldType::String_
-            | FieldType::Bytes_ => false,
+            FieldType::Message(_) => false,
             _ => true,
         }
     }
@@ -132,7 +127,7 @@ impl FieldType {
         /*
         0	Varint	int32, int64, uint32, uint64, sint32, sint64, bool, enum
         1	64-bit	fixed64, sfixed64, double
-        2	Length-delimited	string, bytes, embedded messages, packed repeated fields
+        2	Length-delimited	embedded messages
         3	Start group	groups (deprecated)
         4	End group	groups (deprecated)
         5	32-bit	fixed32, sfixed32, float
@@ -147,8 +142,6 @@ impl FieldType {
             | FieldType::Bool
             | FieldType::Enum(_) => 0,
             FieldType::Fixed64 | FieldType::Sfixed64 | FieldType::Double => 1,
-            | FieldType::String_
-            | FieldType::Bytes_
             | FieldType::Message(_) => 2,
             FieldType::Fixed32 | FieldType::Sfixed32 | FieldType::Float => 5,
             FieldType::MessageOrEnum(_) => unreachable!("Message / Enum not resolved"),
@@ -171,8 +164,6 @@ impl FieldType {
             FieldType::Fixed64 => "fixed64",
             FieldType::Sfixed64 => "sfixed64",
             FieldType::Double => "double",
-            FieldType::String_ => "string",
-            FieldType::Bytes_ => "bytes",
             FieldType::Message(_) => "message",
             FieldType::MessageOrEnum(_) => unreachable!("Message / Enum not resolved"),
         }
@@ -200,8 +191,6 @@ impl FieldType {
             FieldType::Fixed64 => Some("0u64"),
             FieldType::Sfixed64 => Some("0i64"),
             FieldType::Double => Some("0f64"),
-            FieldType::String_ => Some("String::default()"),
-            FieldType::Bytes_ => Some("Vec::default()"),
             FieldType::Enum(ref e) => {
                 let e = e.get_enum(desc);
                 Some(&*e.fully_qualified_fields[0].0)
@@ -222,7 +211,6 @@ impl FieldType {
     fn has_lifetime(
         &self,
         desc: &FileDescriptor,
-        max_length: bool,
         packed: bool,
         ignore: &mut Vec<MessageIndex>,
     ) -> bool {
@@ -233,9 +221,7 @@ impl FieldType {
             | FieldType::Double
             | FieldType::Fixed32
             | FieldType::Sfixed32
-            | FieldType::String_
-            | FieldType::Bytes_
-            | FieldType::Float => !max_length && packed,
+            | FieldType::Float => packed,
             _ => false,
         }
     }
@@ -248,8 +234,6 @@ impl FieldType {
             FieldType::Uint64 | FieldType::Fixed64 => "u64".to_string(),
             FieldType::Double => "f64".to_string(),
             FieldType::Float => "f32".to_string(),
-            FieldType::String_ => "String".to_string(),
-            FieldType::Bytes_ => "Vec<u8>".to_string(), // REVIEW
             FieldType::Bool => "bool".to_string(),
             FieldType::Enum(ref e) => {
                 let e = e.get_enum(desc);
@@ -279,12 +263,6 @@ impl FieldType {
                     m.name
                 )
             }
-            FieldType::String_ => {
-                format!("r.read_{}(bytes)", self.proto_type())
-            }
-            FieldType::Bytes_ => {
-                format!("r.read_{}(bytes)", self.proto_type())
-            }
             FieldType::MessageOrEnum(_) => unreachable!("Message / Enum not resolved"),
             _ => {
                 format!("r.read_{}(bytes)?", self.proto_type())
@@ -305,8 +283,6 @@ impl FieldType {
 
             FieldType::Fixed64 | FieldType::Sfixed64 | FieldType::Double => "8".to_string(),
             FieldType::Fixed32 | FieldType::Sfixed32 | FieldType::Float => "4".to_string(),
-
-            FieldType::String_ | FieldType::Bytes_ => format!("sizeof_len(({}).len())", s),
 
             FieldType::Message(_) => format!("sizeof_len(({}).get_size())", s),
 
@@ -332,9 +308,6 @@ impl FieldType {
             | FieldType::Sfixed32
             | FieldType::Float => format!("write_{}(*{})", self.proto_type(), s),
 
-            FieldType::String_ => format!("write_string(&**{})", s), // REVIEW
-            FieldType::Bytes_ => format!("write_bytes(&**{})", s), // REVIEW
-
             FieldType::Message(_) => format!("write_message({})", s),
 
             FieldType::MessageOrEnum(_) => unreachable!("Message / Enum not resolved"),
@@ -351,14 +324,9 @@ pub struct Field {
     pub default: Option<String>,
     pub packed: Option<bool>,
     pub deprecated: bool,
-    pub max_length: Option<u32>,
 }
 
 impl Field {
-    fn max_length(&self) -> bool {
-        self.max_length.is_some()
-    }
-
     fn packed(&self) -> bool {
         self.packed.unwrap_or(false)
     }
@@ -382,9 +350,6 @@ impl Field {
                     "nan" => "::core::f64::NAN".to_string(),
                     _ => format!("{}f64", *d),
                 },
-                "String" => format!("String::from({})", d),
-                "Bytes" => format!(r#"b{}"#, d), // REVIEW
-                "Vec<u8>" => format!("b{}.to_vec()", d), // REVIEW
                 "bool" => format!("{}", d.parse::<bool>().unwrap()),
                 e => format!("{}::{}", e, d), // enum, as message and map do not have defaults
             }
@@ -423,12 +388,6 @@ impl Field {
             {
                 writeln!(w, "Option<{}>,", rust_type)?
             }
-            Frequency::Repeated
-                if self.packed() && self.max_length.is_some() =>
-            {
-                writeln!(w, "Vec<{}, {}>,", rust_type, self.max_length.unwrap())?;
-            }
-            Frequency::Repeated => writeln!(w, "Vec<{}>,", rust_type)?,
             Frequency::Required | Frequency::Optional => writeln!(w, "{},", rust_type)?,
         }
         Ok(())
@@ -452,20 +411,6 @@ impl Field {
             Frequency::Required | Frequency::Optional => {
                 writeln!(w, "msg.{} = {},", name, val)?
             }
-            Frequency::Repeated if self.packed() && self.max_length.is_some() => {
-                writeln!(w, "msg.{} = r.read_packed_heapless_vec(bytes, |r, bytes| Ok({}))?,", name, val)?;
-            }
-            Frequency::Repeated if self.packed() && self.typ.is_fixed_size() => {
-                writeln!(w, "msg.{} = r.read_packed_fixed(bytes)?.into(),", name)?;
-            }
-            Frequency::Repeated if self.packed() => {
-                writeln!(
-                    w,
-                    "msg.{} = r.read_packed(bytes, |r, bytes| Ok({}))?,",
-                    name, val
-                )?;
-            }
-            Frequency::Repeated => writeln!(w, "msg.{}.push({}),", name, val)?,
         }
         Ok(())
     }
@@ -504,13 +449,6 @@ impl Field {
                 }
             }
             Frequency::Optional => match self.typ {
-                FieldType::Bytes_ => writeln!(
-                    w,
-                    "if self.{}.is_empty() {{ 0 }} else {{ {} + {} }}",
-                    self.name,
-                    tag_size,
-                    self.typ.get_size(&format!("&self.{}", self.name))
-                )?,
                 _ => writeln!(
                     w,
                     "if self.{} == {} {{ 0 }} else {{ {} + {} }}",
@@ -529,37 +467,6 @@ impl Field {
                 tag_size,
                 self.typ.get_size(&format!("&self.{}", self.name))
             )?,
-            Frequency::Repeated => {
-                if self.packed() {
-                    write!(
-                        w,
-                        "if self.{}.is_empty() {{ 0 }} else {{ {} + ",
-                        self.name, tag_size
-                    )?;
-                    match self.typ.wire_type_num_non_packed() {
-                        1 => writeln!(w, "sizeof_len(self.{}.len() * 8) }}", self.name)?,
-                        5 => writeln!(w, "sizeof_len(self.{}.len() * 4) }}", self.name)?,
-                        _ => writeln!(
-                            w,
-                            "sizeof_len(self.{}.iter().map(|s| {}).sum::<usize>()) }}",
-                            self.name,
-                            self.typ.get_size("s")
-                        )?,
-                    }
-                } else {
-                    match self.typ.wire_type_num_non_packed() {
-                        1 => writeln!(w, "({} + 8) * self.{}.len()", tag_size, self.name)?,
-                        5 => writeln!(w, "({} + 4) * self.{}.len()", tag_size, self.name)?,
-                        _ => writeln!(
-                            w,
-                            "self.{}.iter().map(|s| {} + {}).sum::<usize>()",
-                            self.name,
-                            tag_size,
-                            self.typ.get_size("s")
-                        )?,
-                    }
-                }
-            }
         }
         Ok(())
     }
@@ -598,16 +505,6 @@ impl Field {
                 }
             }
             Frequency::Optional => match self.typ {
-                FieldType::Bytes_ => {
-                    writeln!(
-                        w,
-                        "        if !self.{}.is_empty() {{ w.write_with_tag({}, |w| w.{})?; }}",
-                        self.name,
-                        self.tag(),
-                        self.typ
-                            .get_write(&format!("&self.{}", self.name))
-                    )?;
-                }
                 _ => {
                     writeln!(
                         w,
@@ -630,29 +527,6 @@ impl Field {
                     self.tag(),
                     self.typ
                         .get_write(&format!("&self.{}", self.name))
-                )?;
-            }
-            Frequency::Repeated if self.packed() && self.typ.is_fixed_size() => writeln!(
-                w,
-                "        w.write_packed_fixed_with_tag({}, &self.{})?;",
-                self.tag(),
-                self.name
-            )?,
-            Frequency::Repeated if self.packed() => writeln!(
-                w,
-                "        w.write_packed_with_tag({}, &self.{}, |w, m| w.{}, &|m| {})?;",
-                self.tag(),
-                self.name,
-                self.typ.get_write("m"),
-                self.typ.get_size("m")
-            )?,
-            Frequency::Repeated => {
-                writeln!(
-                    w,
-                    "        for s in &self.{} {{ w.write_with_tag({}, |w| w.{})?; }}",
-                    self.name,
-                    self.tag(),
-                    self.typ.get_write("s")
                 )?;
             }
         }
@@ -709,7 +583,7 @@ impl Message {
         ignore.push(self.index.clone());
         let res = self
             .all_fields()
-            .any(|f| f.typ.has_lifetime(desc, f.max_length(), f.packed(), ignore));
+            .any(|f| f.typ.has_lifetime(desc, f.packed(), ignore));
         ignore.pop();
         res
     }
@@ -750,17 +624,10 @@ impl Message {
             writeln!(w)?;
         }
 
-        if desc.owned && self.has_lifetime(desc, &mut Vec::new()) {
-            writeln!(w)?;
-            self.write_impl_owned(w, config)?;
-        }
-
         if !(self.messages.is_empty() && self.enums.is_empty() && self.oneofs.is_empty()) {
             writeln!(w)?;
             writeln!(w, "pub mod mod_{} {{", self.name)?;
             writeln!(w)?;
-            writeln!(w, "use heapless::Vec;")?;
-            writeln!(w, "use heapless::String;")?;
             if !self.messages.is_empty() || !self.oneofs.is_empty() {
                 writeln!(w, "use super::*;")?;
             }
@@ -950,116 +817,6 @@ impl Message {
         Ok(())
     }
 
-    fn write_impl_owned<W: Write>(&self, w: &mut W, config: &Config) -> Result<()> {
-        write!(
-            w,
-            r#"
-            #[derive(Debug)]
-            struct {name}OwnedInner {{
-                buf: Vec<u8>,
-                proto: {name}<'static>,
-                _pin: core::marker::PhantomPinned,
-            }}
-
-            impl {name}OwnedInner {{
-                fn new(buf: Vec<u8>) -> Result<core::pin::Pin<Box<Self>>> {{
-                    let inner = Self {{
-                        buf,
-                        proto: unsafe {{ core::mem::MaybeUninit::zeroed().assume_init() }},
-                        _pin: core::marker::PhantomPinned,
-                    }};
-                    let mut pinned = Box::pin(inner);
-
-                    let mut reader = BytesReader::from_bytes(&pinned.buf);
-                    let proto = {name}::from_reader(&mut reader, &pinned.buf)?;
-
-                    unsafe {{
-                        let proto = core::mem::transmute::<_, {name}<'static>>(proto);
-                        pinned.as_mut().get_unchecked_mut().proto = proto;
-                    }}
-                    Ok(pinned)
-                }}
-            }}
-
-            pub struct {name}Owned {{
-                inner: core::pin::Pin<Box<{name}OwnedInner>>,
-            }}
-
-            #[allow(dead_code)]
-            impl {name}Owned {{
-                pub fn buf(&self) -> &[u8] {{
-                    &self.inner.buf
-                }}
-
-                pub fn proto(&self) -> &{name} {{
-                    &self.inner.proto
-                }}
-            }}
-
-            impl core::fmt::Debug for {name}Owned {{
-                fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {{
-                    self.inner.proto.fmt(f)
-                }}
-            }}
-
-            impl Deref for {name}Owned {{
-                type Target = {name}<'static>;
-
-                fn deref(&self) -> &Self::Target {{
-                    &self.inner.proto
-                }}
-            }}
-
-            impl DerefMut for {name}Owned {{
-                fn deref_mut(&mut self) -> &mut Self::Target {{
-                    unsafe {{ &mut self.inner.as_mut().get_unchecked_mut().proto }}
-                }}
-            }}
-
-            impl TryFrom<Vec<u8>> for {name}Owned {{
-                type Error=quick_protobuf::Error;
-
-                fn try_from(buf: Vec<u8>) -> Result<Self> {{
-                    Ok(Self {{ inner: {name}OwnedInner::new(buf)? }})
-                }}
-            }}
-
-            impl TryInto<Vec<u8>> for {name}Owned {{
-                type Error=quick_protobuf::Error;
-
-                fn try_into(self) -> Result<Vec<u8>> {{
-                    let mut buf = Vec::new();
-                    let mut writer = Writer::new(&mut buf);
-                    self.deref().write_message(&mut writer)?;
-                    Ok(buf)
-                }}
-            }}
-
-            #[cfg(feature = "test_helpers")]
-            impl<'a> From<{name}<'a>> for {name}Owned {{
-                fn from(proto: {name}) -> Self {{
-                    use quick_protobuf::{{MessageWrite, Writer}};
-
-                    let mut buf = Vec::new();
-                    let mut writer = Writer::new(&mut buf);
-                    proto.write_message(&mut writer).expect("bad proto serialization");
-                    Self {{ inner: {name}OwnedInner::new(buf).unwrap() }}
-                }}
-            }}
-            "#,
-            name = self.name
-        )?;
-
-        if config.gen_info {
-            write!(w, r#"
-            impl MessageInfo for {name}Owned {{
-                const PATH: &'static str = "{module}.{name}";
-            }}
-            "#, name = self.name, module = self.module)?;
-        }
-        Ok(())
-    }
-
     fn write_get_size<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
         writeln!(w, "    fn get_size(&self) -> usize {{")?;
         writeln!(w, "        0")?;
@@ -1151,16 +908,6 @@ impl Message {
         }
         for m in &mut self.oneofs {
             m.set_package(&child_package, &child_module);
-        }
-    }
-
-    fn set_repeated_as_packed(&mut self) {
-        for f in self.all_fields_mut() {
-            if f.packed.is_none() {
-                if let Frequency::Repeated = f.frequency {
-                    f.packed = Some(true);
-                }
-            }
         }
     }
 
@@ -1364,7 +1111,7 @@ impl OneOf {
     fn has_lifetime(&self, desc: &FileDescriptor) -> bool {
         self.fields
             .iter()
-            .any(|f| !f.deprecated && f.typ.has_lifetime(desc, f.max_length(), f.packed(), &mut Vec::new()))
+            .any(|f| !f.deprecated && f.typ.has_lifetime(desc, f.packed(), &mut Vec::new()))
     }
 
     fn set_package(&mut self, package: &str, module: &str) {
@@ -1568,7 +1315,6 @@ pub struct Config {
     pub custom_repr: Option<String>,
     pub custom_rpc_generator: RpcGeneratorFunction,
     pub custom_includes: Vec<String>,
-    pub owned: bool,
     pub gen_info: bool,
     pub add_deprecated_fields: bool,
 }
@@ -1582,7 +1328,6 @@ pub struct FileDescriptor {
     pub enums: Vec<Enumerator>,
     pub module: String,
     pub rpc_services: Vec<RpcService>,
-    pub owned: bool,
 }
 
 impl FileDescriptor {
@@ -1595,7 +1340,6 @@ impl FileDescriptor {
 
     pub fn write_proto(config: &Config) -> Result<()> {
         let mut desc = FileDescriptor::read_proto(&config.in_file, &config.import_search_path)?;
-        desc.owned = config.owned;
 
         if desc.messages.is_empty() && desc.enums.is_empty() {
             // There could had been unsupported structures, so bail early
@@ -1783,12 +1527,6 @@ impl FileDescriptor {
     }
 
     fn set_defaults(&mut self) -> Result<()> {
-        // if proto3, then changes several defaults
-        if let Syntax::Proto3 = self.syntax {
-            for m in &mut self.messages {
-                m.set_repeated_as_packed();
-            }
-        }
         // this is very inefficient but we don't care ...
         //let msgs = self.messages.clone();
         let copy = self.clone();
@@ -2001,7 +1739,6 @@ impl FileDescriptor {
         writeln!(w, "#![allow(unused_imports)]")?;
         writeln!(w, "#![allow(unknown_lints)]")?;
         writeln!(w, "#![allow(clippy::all)]")?;
-        writeln!(w, "#![no_std]")?;
 
         if config.add_deprecated_fields {
             writeln!(w, "#![allow(deprecated)]")?;
@@ -2026,20 +1763,10 @@ impl FileDescriptor {
             return Ok(());
         }
 
-        writeln!(w, "use heapless::Vec;")?;
-        writeln!(w, "use heapless::String;")?;
-
         writeln!(
             w,
             "use quick_protobuf::{{MessageInfo, MessageRead, MessageWrite, BytesReader, Writer, WriterBackend, Result}};"
         )?;
-
-        if self.owned {
-            write!(
-                w,
-                "use core::{{convert::{{TryFrom, TryInto}}, ops::{{Deref, DerefMut}}}};"
-            )?;
-        }
 
         writeln!(w, "use quick_protobuf::sizeofs::*;")?;
         for include in &config.custom_includes {
