@@ -161,6 +161,35 @@ impl<W: WriterBackend> Writer<W> {
         self.write_bytes(s.as_bytes())
     }
 
+    /// Writes packed repeated field: length first then the chunk of data
+    pub fn write_packed<M, F, S>(&mut self, v: &[M], mut write: F, size: &S) -> Result<()>
+    where
+        F: FnMut(&mut Self, &M) -> Result<()>,
+        S: Fn(&M) -> usize,
+    {
+        if v.is_empty() {
+            return Ok(());
+        }
+        let len: usize = v.iter().map(|m| size(m)).sum();
+        self.write_varint(len as u64)?;
+        for m in v {
+            write(self, m)?;
+        }
+        Ok(())
+    }
+
+    /// Writes packed repeated field when we know the size of items
+    ///
+    /// `item_size` is internally used to compute the total length
+    /// As the length is fixed (and the same as rust internal representation, we can directly dump
+    /// all data at once
+    #[inline]
+    pub fn write_packed_fixed<M>(&mut self, v: &[M]) -> Result<()> {
+        let len = v.len() * ::core::mem::size_of::<M>();
+        let bytes = unsafe { ::core::slice::from_raw_parts(v.as_ptr() as *const u8, len) };
+        self.write_bytes(bytes)
+    }
+
     /// Writes a message which implements `MessageWrite`
     pub fn write_message<M: MessageWrite>(&mut self, m: &M) -> Result<()> {
         let len = m.get_size();
@@ -175,6 +204,64 @@ impl<W: WriterBackend> Writer<W> {
     {
         self.write_tag(tag)?;
         write(self)
+    }
+    
+    /// Writes tag then repeated field
+    ///
+    /// If array is empty, then do nothing (do not even write the tag)
+    pub fn write_packed_with_tag<M, F, S>(
+        &mut self,
+        tag: u32,
+        v: &[M],
+        mut write: F,
+        size: &S,
+    ) -> Result<()>
+    where
+        F: FnMut(&mut Self, &M) -> Result<()>,
+        S: Fn(&M) -> usize,
+    {
+        if v.is_empty() {
+            return Ok(());
+        }
+        self.write_tag(tag)?;
+        let len: usize = v.iter().map(|m| size(m)).sum();
+        self.write_varint(len as u64)?;
+        for m in v {
+            write(self, m)?;
+        }
+        Ok(())
+    }
+    
+    /// Writes tag then repeated field
+    ///
+    /// If array is empty, then do nothing (do not even write the tag)
+    pub fn write_packed_fixed_with_tag<M>(&mut self, tag: u32, v: &[M]) -> Result<()> {
+        if v.is_empty() {
+            return Ok(());
+        }
+
+        self.write_tag(tag)?;
+        let len = ::core::mem::size_of::<M>() * v.len();
+        let bytes = unsafe { ::core::slice::from_raw_parts(v.as_ptr() as *const u8, len) };
+        self.write_bytes(bytes)
+    }
+
+    /// Writes tag then repeated field with fixed length item size
+    ///
+    /// If array is empty, then do nothing (do not even write the tag)
+    pub fn write_packed_fixed_size_with_tag<M>(
+        &mut self,
+        tag: u32,
+        v: &[M],
+        item_size: usize,
+    ) -> Result<()> {
+        if v.is_empty() {
+            return Ok(());
+        }
+        self.write_tag(tag)?;
+        let len = v.len() * item_size;
+        let bytes = unsafe { ::core::slice::from_raw_parts(v as *const [M] as *const M as *const u8, len) };
+        self.write_bytes(bytes)
     }
 
     /// Write entire map
@@ -213,7 +300,7 @@ pub fn serialize_into_slice<M: MessageWrite>(message: &M, out: &mut [u8]) -> Res
 }
 
 /// Serialize a `MessageWrite` into a u8 heapless::vec
-pub fn serialize_into_heapless_vec<M: MessageWrite, const T: usize>(message: &M, out: &mut Vec<u8, T>) -> Result<()> {
+pub fn serialize_into_vec<M: MessageWrite, const T: usize>(message: &M, out: &mut Vec<u8, T>) -> Result<()> {
     let len = message.get_size();
     let len = len + sizeof_varint(len as u64);
     if out.capacity() < len {

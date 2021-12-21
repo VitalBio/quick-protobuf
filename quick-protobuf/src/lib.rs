@@ -15,4 +15,4 @@ pub mod writer;
 pub use crate::errors::{Error, Result};
 pub use crate::message::{MessageInfo, MessageRead, MessageWrite};
 pub use crate::reader::{deserialize_from_slice, BytesReader};
-pub use crate::writer::{serialize_into_slice, serialize_into_heapless_vec, BytesWriter, Writer, WriterBackend};
+pub use crate::writer::{serialize_into_slice, serialize_into_vec, BytesWriter, Writer, WriterBackend};

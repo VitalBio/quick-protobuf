@@ -7,8 +7,11 @@
 //!
 //! It is advised, for convenience to directly work with a `Reader`.
 
+use core::fmt::Debug;
+
 use crate::errors::{Error, Result};
 use crate::message::MessageRead;
+use heapless::Vec;
 
 use byteorder::ByteOrder;
 use byteorder::LittleEndian as LE;
@@ -307,6 +310,60 @@ impl BytesReader {
         self.start = self.end;
         self.end = cur_end;
         Ok(v)
+    }
+
+    /// Reads bytes (Vec<u8>)
+    #[inline]
+    pub fn read_bytes<'a>(&mut self, bytes: &'a [u8]) -> Result<&'a [u8]> {
+        self.read_len_varint(bytes, |r, b| Ok(&b[r.start..r.end]))
+    }
+
+    /// Reads string (String)
+    #[inline]
+    pub fn read_string<'a>(&mut self, bytes: &'a [u8]) -> Result<&'a str> {
+        self.read_len_varint(bytes, |r, b| {
+            ::core::str::from_utf8(&b[r.start..r.end]).map_err(|e| e.into())
+        })
+    }
+
+    /// Reads packed repeated field (heapless::Vec<M,N>)
+    ///
+    /// Note: packed field are stored as a variable length chunk of data, while regular repeated
+    /// fields behaves like an iterator, yielding their tag every time
+    #[inline]
+    pub fn read_packed<'a, M, F, const N: usize>(&mut self, bytes: &'a [u8], mut read: F) -> Result<Vec<M, N>>
+    where
+        F: FnMut(&mut BytesReader, &'a [u8]) -> Result<M>,
+    {
+        self.read_len_varint(bytes, |r, b| {
+            let mut v = Vec::<M, N>::new();
+            
+            while !r.is_eof() && !v.is_full() {
+                v.push(read(r, b)?).map_err(|_| Error::UnexpectedEndOfBuffer)?;
+            }
+            Ok(v)
+        })
+    }
+
+    /// Reads packed repeated field where M can directly be transmutted from raw bytes
+    ///
+    /// Note: packed field are stored as a variable length chunk of data, while regular repeated
+    /// fields behaves like an iterator, yielding their tag everytime
+    #[inline]
+    pub fn read_packed_fixed<'a, M>(&mut self, bytes: &'a [u8]) -> Result<&'a [M]> {
+        let len = self.read_varint32(bytes)? as usize;
+        if self.len() < len {
+            return Err(Error::UnexpectedEndOfBuffer);
+        }
+        let n = len / ::core::mem::size_of::<M>();
+        let slice = unsafe {
+            ::core::slice::from_raw_parts(
+                bytes.get_unchecked(self.start) as *const u8 as *const M,
+                n,
+            )
+        };
+        self.start += len;
+        Ok(slice)
     }
 
     /// Reads a nested message

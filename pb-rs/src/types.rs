@@ -35,6 +35,7 @@ impl Default for Syntax {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Frequency {
     Optional,
+    Repeated,
     Required,
 }
 
@@ -100,6 +101,8 @@ pub enum FieldType {
     Fixed64,
     Sfixed64,
     Double,
+    String_,
+    Bytes_,
     Message(MessageIndex),
     MessageOrEnum(String),
     Fixed32,
@@ -110,7 +113,9 @@ pub enum FieldType {
 impl FieldType {
     pub fn is_primitive(&self) -> bool {
         match *self {
-            FieldType::Message(_) => false,
+            FieldType::Message(_) 
+            | FieldType::String_
+            | FieldType::Bytes_ => false,
             _ => true,
         }
     }
@@ -142,6 +147,8 @@ impl FieldType {
             | FieldType::Bool
             | FieldType::Enum(_) => 0,
             FieldType::Fixed64 | FieldType::Sfixed64 | FieldType::Double => 1,
+            FieldType::String_
+            | FieldType::Bytes_
             | FieldType::Message(_) => 2,
             FieldType::Fixed32 | FieldType::Sfixed32 | FieldType::Float => 5,
             FieldType::MessageOrEnum(_) => unreachable!("Message / Enum not resolved"),
@@ -164,6 +171,8 @@ impl FieldType {
             FieldType::Fixed64 => "fixed64",
             FieldType::Sfixed64 => "sfixed64",
             FieldType::Double => "double",
+            FieldType::String_ => "string",
+            FieldType::Bytes_ => "bytes",
             FieldType::Message(_) => "message",
             FieldType::MessageOrEnum(_) => unreachable!("Message / Enum not resolved"),
         }
@@ -191,6 +200,8 @@ impl FieldType {
             FieldType::Fixed64 => Some("0u64"),
             FieldType::Sfixed64 => Some("0i64"),
             FieldType::Double => Some("0f64"),
+            FieldType::String_ => Some("String::default()"),
+            FieldType::Bytes_ => Some("Vec::default()"),
             FieldType::Enum(ref e) => {
                 let e = e.get_enum(desc);
                 Some(&*e.fully_qualified_fields[0].0)
@@ -211,6 +222,7 @@ impl FieldType {
     fn has_lifetime(
         &self,
         desc: &FileDescriptor,
+        max_length: bool,
         packed: bool,
         ignore: &mut Vec<MessageIndex>,
     ) -> bool {
@@ -221,7 +233,9 @@ impl FieldType {
             | FieldType::Double
             | FieldType::Fixed32
             | FieldType::Sfixed32
-            | FieldType::Float => packed,
+            | FieldType::String_
+            | FieldType::Bytes_
+            | FieldType::Float => !max_length && packed,
             _ => false,
         }
     }
@@ -234,6 +248,8 @@ impl FieldType {
             FieldType::Uint64 | FieldType::Fixed64 => "u64".to_string(),
             FieldType::Double => "f64".to_string(),
             FieldType::Float => "f32".to_string(),
+            FieldType::String_ => "String<N>".to_string(),
+            FieldType::Bytes_ => "Vec<u8, N>".to_string(),
             FieldType::Bool => "bool".to_string(),
             FieldType::Enum(ref e) => {
                 let e = e.get_enum(desc);
@@ -263,6 +279,12 @@ impl FieldType {
                     m.name
                 )
             }
+            FieldType::String_ => {
+                format!("r.read_{}(bytes)", self.proto_type())
+            }
+            FieldType::Bytes_ => {
+                format!("r.read_{}(bytes)", self.proto_type())
+            }
             FieldType::MessageOrEnum(_) => unreachable!("Message / Enum not resolved"),
             _ => {
                 format!("r.read_{}(bytes)?", self.proto_type())
@@ -283,6 +305,8 @@ impl FieldType {
 
             FieldType::Fixed64 | FieldType::Sfixed64 | FieldType::Double => "8".to_string(),
             FieldType::Fixed32 | FieldType::Sfixed32 | FieldType::Float => "4".to_string(),
+
+            FieldType::String_ | FieldType::Bytes_ => format!("sizeof_len(({}).len())", s),
 
             FieldType::Message(_) => format!("sizeof_len(({}).get_size())", s),
 
@@ -307,6 +331,9 @@ impl FieldType {
             | FieldType::Fixed32
             | FieldType::Sfixed32
             | FieldType::Float => format!("write_{}(*{})", self.proto_type(), s),
+            
+            FieldType::String_ => format!("write_string(*{})", s),
+            FieldType::Bytes_ => format!("write_bytes(*{})", s),
 
             FieldType::Message(_) => format!("write_message({})", s),
 
@@ -324,9 +351,14 @@ pub struct Field {
     pub default: Option<String>,
     pub packed: Option<bool>,
     pub deprecated: bool,
+    pub max_length: Option<u32>,
 }
 
 impl Field {
+    fn max_length(&self) -> bool {
+        self.max_length.is_some()
+    }
+
     fn packed(&self) -> bool {
         self.packed.unwrap_or(false)
     }
@@ -350,6 +382,9 @@ impl Field {
                     "nan" => "::core::f64::NAN".to_string(),
                     _ => format!("{}f64", *d),
                 },
+                "String" => format!("String::from({})", d),
+                "Bytes" => format!(r#"b{}"#, d),
+                "Vec<u8>" => format!("b{}.to_vec()", d),
                 "bool" => format!("{}", d.parse::<bool>().unwrap()),
                 e => format!("{}::{}", e, d), // enum, as message and map do not have defaults
             }
@@ -388,6 +423,7 @@ impl Field {
             {
                 writeln!(w, "Option<{}>,", rust_type)?
             }
+            Frequency::Repeated => writeln!(w, "Vec<{}, {}>,", rust_type, self.max_length.unwrap())?,
             Frequency::Required | Frequency::Optional => writeln!(w, "{},", rust_type)?,
         }
         Ok(())
@@ -408,6 +444,13 @@ impl Field {
             {
                 writeln!(w, "msg.{} = Some({}),", name, val)?
             }
+            Frequency::Repeated if self.packed() && self.typ.is_fixed_size() => {
+                writeln!(w, "msg.{} = r.read_packed_fixed(bytes)?.into(),", name)?;
+            }
+            Frequency::Repeated if self.packed() => {
+                writeln!(w, "msg.{} = r.read_packed(bytes, |r, bytes| Ok({}))?,", name, val)?;
+            }
+            Frequency::Repeated => writeln!(w, "{{ msg.{}.push({}); }},", name, val)?,
             Frequency::Required | Frequency::Optional => {
                 writeln!(w, "msg.{} = {},", name, val)?
             }
@@ -467,6 +510,38 @@ impl Field {
                 tag_size,
                 self.typ.get_size(&format!("&self.{}", self.name))
             )?,
+            Frequency::Repeated => {
+                if self.packed() {
+                    write!(
+                        w,
+                        "if self.{}.is_empty() {{ 0 }} else {{ {} + ",
+                        self.name, tag_size
+                    )?;
+                    match self.typ.wire_type_num_non_packed() {
+                        1 => writeln!(w, "sizeof_len(self.{}.len() * 8) }}", self.name)?,
+                        5 => writeln!(w, "sizeof_len(self.{}.len() * 4) }}", self.name)?,
+                        _ => writeln!(
+                            w,
+                            "sizeof_len(self.{}.iter().map(|s| {}).sum::<usize>()) }}",
+                            self.name,
+                            self.typ.get_size("s")
+                        )?,
+                    }
+                }
+                else {
+                    match self.typ.wire_type_num_non_packed() {
+                        1 => writeln!(w, "({} + 8) * self.{}.len()", tag_size, self.name)?,
+                        5 => writeln!(w, "({} + 4) * self.{}.len()", tag_size, self.name)?,
+                        _ => writeln!(
+                            w,
+                            "self.{}.iter().map(|s| {} + {}).sum::<usize>()",
+                            self.name,
+                            tag_size,
+                            self.typ.get_size("s")
+                        )?,
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -529,6 +604,30 @@ impl Field {
                         .get_write(&format!("&self.{}", self.name))
                 )?;
             }
+            
+            Frequency::Repeated if self.packed() && self.typ.is_fixed_size() => writeln!(
+                w,
+                "        w.write_packed_fixed_with_tag({}, &self.{})?;",
+                self.tag(),
+                self.name
+            )?,
+            Frequency::Repeated if self.packed() => writeln!(
+                w,
+                "        w.write_packed_with_tag({}, &self.{}, |w, m| w.{}, &|m| {})?;",
+                self.tag(),
+                self.name,
+                self.typ.get_write("m"),
+                self.typ.get_size("m")
+            )?,
+            Frequency::Repeated => {
+                writeln!(
+                    w,
+                    "        for s in &self.{} {{ w.write_with_tag({}, |w| w.{})?; }}",
+                    self.name,
+                    self.tag(),
+                    self.typ.get_write("s")
+                )?;
+            }
         }
         Ok(())
     }
@@ -583,7 +682,7 @@ impl Message {
         ignore.push(self.index.clone());
         let res = self
             .all_fields()
-            .any(|f| f.typ.has_lifetime(desc, f.packed(), ignore));
+            .any(|f| f.typ.has_lifetime(desc, f.max_length(), f.packed(), ignore));
         ignore.pop();
         res
     }
@@ -1111,7 +1210,7 @@ impl OneOf {
     fn has_lifetime(&self, desc: &FileDescriptor) -> bool {
         self.fields
             .iter()
-            .any(|f| !f.deprecated && f.typ.has_lifetime(desc, f.packed(), &mut Vec::new()))
+            .any(|f| !f.deprecated && f.typ.has_lifetime(desc, f.max_length(), f.packed(), &mut Vec::new()))
     }
 
     fn set_package(&mut self, package: &str, module: &str) {
@@ -1757,6 +1856,12 @@ impl FileDescriptor {
     }
 
     fn write_uses<W: Write>(&self, w: &mut W, config: &Config) -> Result<()> {
+        if self.messages.iter().any(|m|
+            m.all_fields().any(|f| f.max_length())
+        ) {
+            writeln!(w, "use heapless::Vec;")?;
+        }
+
         if self.messages.iter().all(|m| m.is_unit()) {
             writeln!(
                 w,
