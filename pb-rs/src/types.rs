@@ -450,7 +450,7 @@ impl Field {
             Frequency::Repeated if self.packed() => {
                 writeln!(w, "msg.{} = r.read_packed(bytes, |r, bytes| Ok({}))?,", name, val)?;
             }
-            Frequency::Repeated => writeln!(w, "{{ msg.{}.push({}); }},", name, val)?,
+            Frequency::Repeated => writeln!(w, "{{ msg.{}.push({}).unwrap(); }},", name, val)?,
             Frequency::Required | Frequency::Optional => {
                 writeln!(w, "msg.{} = {},", name, val)?
             }
