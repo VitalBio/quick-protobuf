@@ -1009,6 +1009,16 @@ impl Message {
             m.set_package(&child_package, &child_module);
         }
     }
+    
+    fn set_repeated_as_packed(&mut self) {
+        for f in self.all_fields_mut() {
+            if f.packed.is_none() {
+                if let Frequency::Repeated = f.frequency {
+                    f.packed = Some(true);
+                }
+            }
+        }
+    }
 
     fn unset_packed_non_primitives(&mut self) {
         for f in self.all_fields_mut() {
@@ -1628,6 +1638,12 @@ impl FileDescriptor {
     }
 
     fn set_defaults(&mut self) -> Result<()> {
+        // if proto3, then changes several defaults
+        if let Syntax::Proto3 = self.syntax {
+            for m in &mut self.messages {
+                m.set_repeated_as_packed();
+            }
+        }
         // this is very inefficient but we don't care ...
         //let msgs = self.messages.clone();
         let copy = self.clone();
