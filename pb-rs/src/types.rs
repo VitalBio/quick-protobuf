@@ -1159,7 +1159,7 @@ impl Enumerator {
     }
 
     fn write_definition<W: Write>(&self, w: &mut W) -> Result<()> {
-        writeln!(w, "#[derive(Debug, PartialEq, Eq, Clone, Copy)]")?;
+        writeln!(w, "#[derive(Debug, Format, PartialEq, Eq, Clone, Copy)]")?;
         writeln!(w, "pub enum {} {{", self.name)?;
         for &(ref f, ref number) in &self.fields {
             writeln!(w, "    {} = {},", f, number)?;
@@ -1876,6 +1876,10 @@ impl FileDescriptor {
             m.all_fields().any(|f| f.max_length())
         ) {
             writeln!(w, "use heapless::Vec;")?;
+        }
+
+        if ! self.enums.is_empty() {
+            writeln!(w, "use defmt::Format;")?;
         }
 
         if self.messages.iter().all(|m| m.is_unit()) {
