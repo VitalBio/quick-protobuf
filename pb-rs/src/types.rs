@@ -1575,6 +1575,9 @@ impl FileDescriptor {
             m.set_package("", &self.module);
         }
 
+        // HACK: Remove rust_options.proto import
+        self.import_paths.retain(|path| path.to_str().unwrap() != "rust_options.proto");
+
         for import in &self.import_paths {
             // this is the same logic as the C preprocessor;
             // if the include path item is absolute, then append the filename,

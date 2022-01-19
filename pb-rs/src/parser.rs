@@ -254,7 +254,7 @@ named!(
                         .expect("Cannot parse Deprecated value")),
                 max_length: key_vals
                     .iter()
-                    .find(|&&(k, _)| k == "rust_max_length" || k == "rust_ext.rust_max_length")
+                    .find(|&&(k, _)| k == "rust_max_length" || k == "rust_options.rust_max_length")
                     .map(|&(_, v)| v
                         .parse::<u32>()
                         .expect("Cannot parse rust_max_length value")),
