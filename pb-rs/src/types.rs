@@ -356,7 +356,8 @@ pub struct Field {
 
 impl Field {
     fn max_length(&self) -> bool {
-        self.max_length.is_some()
+        // self.max_length.is_some()
+        self.frequency == Frequency::Repeated
     }
 
     fn packed(&self) -> bool {
@@ -423,7 +424,7 @@ impl Field {
             {
                 writeln!(w, "Option<{}>,", rust_type)?
             }
-            Frequency::Repeated => writeln!(w, "Vec<{}, {}>,", rust_type, self.max_length.unwrap())?,
+            Frequency::Repeated => writeln!(w, "Vec<{}, {}>,", rust_type, 1000)?,
             Frequency::Required | Frequency::Optional => writeln!(w, "{},", rust_type)?,
         }
         Ok(())
