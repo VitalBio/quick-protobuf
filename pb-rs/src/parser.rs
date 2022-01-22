@@ -149,24 +149,46 @@ named!(
 );
 
 named!(
-    option_key<&str>,
-    alt_complete!(delimited!(tag!("("), word_ref, tag!(")"))
-                  | word_ref)
+    option_key<String>,
+    alt_complete!(
+        do_parse!(
+            extension_words: delimited!(
+                tag!("("),
+                separated_nonempty_list_complete!(tag!("."), word_ref),
+                tag!(")")
+            )
+            >> tag!(".")
+            >> field_words: separated_nonempty_list_complete!(tag!("."), word_ref)
+            >> (format!("({}).{}", extension_words.join("."), field_words.join(".")))
+        )
+        | do_parse!(word: word_ref >> (String::from(word)))
+    )
 );
 
 named!(
-    key_val<(&str, &str)>,
+    key_vals<Vec<(String, &str)>>,
     do_parse!(
-        tag!("[")
-            >> many0!(br)
-            >> key: option_key
-            >> many0!(br)
-            >> tag!("=")
-            >> many0!(br)
-            >> value: map_res!(is_not!("]"), str::from_utf8)
-            >> tag!("]")
-            >> many0!(br)
-            >> ((key, value.trim()))
+        vec_opt: opt!(
+            delimited!(
+                tag!("["),
+                separated_nonempty_list_complete!(tag!(","), key_val),
+                tag!("]")
+            )
+        ) >> (vec_opt.unwrap_or(Vec::new()))
+    )
+);
+
+named!(
+    key_val<(String, &str)>,
+    do_parse!(
+        many0!(br)
+        >> key: option_key
+        >> many0!(br)
+        >> tag!("=")
+        >> many0!(br)
+        >> value: map_res!(is_not!("],"), str::from_utf8)
+        >> many0!(br)
+        >> ((key, value.trim()))
     )
 );
 
@@ -232,7 +254,7 @@ named!(
             >> many0!(br)
             >> number: alt!(hex_integer | integer)
             >> many0!(br)
-            >> key_vals: many0!(key_val)
+            >> key_vals: key_vals
             >> tag!(";")
             >> (Field {
                 name: name,
@@ -240,24 +262,24 @@ named!(
                 number: number,
                 default: key_vals
                     .iter()
-                    .find(|&&(k, _)| k == "default")
+                    .find(|&&(ref k, _)| &*k == "default")
                     .map(|&(_, v)| v.to_string()),
                 packed: key_vals
                     .iter()
-                    .find(|&&(k, _)| k == "packed")
+                    .find(|&&(ref k, _)| &*k == "packed")
                     .map(|&(_, v)| str::FromStr::from_str(v).expect("Cannot parse Packed value")),
                 typ: typ,
                 deprecated: key_vals
                     .iter()
-                    .find(|&&(k, _)| k == "deprecated")
+                    .find(|&&(ref k, _)| &*k == "deprecated")
                     .map_or(false, |&(_, v)| str::FromStr::from_str(v)
                         .expect("Cannot parse Deprecated value")),
                 max_length: key_vals
                     .iter()
-                    .find(|&&(k, _)| k == "rust_max_length" || k == "rust_options.rust_max_length")
+                    .find(|&&(ref k, _)| &*k == "(vital_options.rust).max_length")
                     .map(|&(_, v)| v
                         .parse::<u32>()
-                        .expect("Cannot parse rust_max_length value")),
+                        .expect("Cannot parse (vital_options.rust).max_length value")),
             })
     )
 );

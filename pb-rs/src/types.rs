@@ -1576,7 +1576,7 @@ impl FileDescriptor {
         }
 
         // HACK: Remove rust_options.proto import
-        self.import_paths.retain(|path| path.to_str().unwrap() != "rust_options.proto");
+        self.import_paths.retain(|path| path.to_str().unwrap() != "vital_options.proto");
 
         for import in &self.import_paths {
             // this is the same logic as the C preprocessor;
