@@ -375,6 +375,18 @@ impl BytesReader {
     {
         self.read_len_varint(bytes, M::from_reader)
     }
+    
+    /// Reads a nested message
+    ///
+    /// The length is computed from the size of the message `bytes`
+    #[cfg_attr(std, inline)]
+    pub fn read_message_without_len<'a, M>(&mut self, bytes: &'a [u8]) -> Result<M>
+    where
+        M: MessageRead<'a>,
+    {
+        let len = bytes.len();
+        self.read_len(bytes, M::from_reader, len)
+    }
 
     /// Reads a nested message
     ///
@@ -456,7 +468,7 @@ impl BytesReader {
 /// Deserialize a `MessageRead from a `&[u8]`
 pub fn deserialize_from_slice<'a, M: MessageRead<'a>>(bytes: &'a [u8]) -> Result<M> {
     let mut reader = BytesReader::from_bytes(&bytes);
-    reader.read_message::<M>(&bytes)
+    reader.read_message_without_len::<M>(&bytes)
 }
 
 #[test]

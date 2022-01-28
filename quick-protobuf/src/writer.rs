@@ -197,6 +197,12 @@ impl<W: WriterBackend> Writer<W> {
         m.write_message(self)
     }
 
+    /// Writes a message which implements `MessageWrite` without adding the length prefix
+    #[cfg_attr(std, inline)]
+    pub fn write_message_without_len<M: MessageWrite>(&mut self, m: &M) -> Result<()> {
+        m.write_message(self)
+    }
+
     /// Writes another item prefixed with tag
     pub fn write_with_tag<F>(&mut self, tag: u32, mut write: F) -> Result<()>
     where
@@ -293,7 +299,7 @@ pub fn serialize_into_slice<M: MessageWrite>(message: &M, out: &mut [u8]) -> Res
     }
     {
         let mut writer = Writer::new(BytesWriter::new(out));
-        writer.write_message(message)?;
+        writer.write_message_without_len(message)?;
     }
 
     Ok(())
@@ -302,14 +308,13 @@ pub fn serialize_into_slice<M: MessageWrite>(message: &M, out: &mut [u8]) -> Res
 /// Serialize a `MessageWrite` into a u8 heapless::vec
 pub fn serialize_into_vec<M: MessageWrite, const T: usize>(message: &M, out: &mut Vec<u8, T>) -> Result<()> {
     let len = message.get_size();
-    let len = len + sizeof_varint(len as u64);
     if out.capacity() < len {
         return Err(Error::OutputBufferTooSmall);
     }
     out.resize_default(len).unwrap();
     {
         let mut writer = Writer::new(BytesWriter::new(out));
-        writer.write_message(message)?;
+        writer.write_message_without_len(message)?;
     }
 
     Ok(())
