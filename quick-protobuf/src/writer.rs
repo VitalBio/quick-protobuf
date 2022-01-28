@@ -2,7 +2,7 @@
 
 use crate::errors::{Error, Result};
 use crate::message::MessageWrite;
-use crate::sizeofs::sizeof_varint;
+// use crate::sizeofs::sizeof_varint;
 
 use byteorder::{ByteOrder, LittleEndian as LE};
 use heapless::Vec;
