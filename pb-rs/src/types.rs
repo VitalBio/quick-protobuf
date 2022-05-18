@@ -56,9 +56,7 @@ impl MessageIndex {
         self.indexes
             .iter()
             .skip(1)
-            .fold(first_message, |cur, next| {
-                cur.and_then(|msg| msg.messages.get(*next))
-            })
+            .fold(first_message, |cur, next| cur.and_then(|msg| msg.messages.get(*next)))
             .expect("Message index not found")
     }
 
@@ -113,9 +111,7 @@ pub enum FieldType {
 impl FieldType {
     pub fn is_primitive(&self) -> bool {
         match *self {
-            FieldType::Message(_) 
-            | FieldType::String_
-            | FieldType::Bytes_ => false,
+            FieldType::Message(_) | FieldType::String_ | FieldType::Bytes_ => false,
             _ => true,
         }
     }
@@ -147,9 +143,7 @@ impl FieldType {
             | FieldType::Bool
             | FieldType::Enum(_) => 0,
             FieldType::Fixed64 | FieldType::Sfixed64 | FieldType::Double => 1,
-            FieldType::String_
-            | FieldType::Bytes_
-            | FieldType::Message(_) => 2,
+            FieldType::String_ | FieldType::Bytes_ | FieldType::Message(_) => 2,
             FieldType::Fixed32 | FieldType::Sfixed32 | FieldType::Float => 5,
             FieldType::MessageOrEnum(_) => unreachable!("Message / Enum not resolved"),
         }
@@ -201,7 +195,7 @@ impl FieldType {
             FieldType::Sfixed64 => Some("0i64"),
             FieldType::Double => Some("0f64"),
             FieldType::String_ => Some("String::default()"),
-            FieldType::Bytes_ => Some("Vec::default()"),
+            FieldType::Bytes_ => None,
             FieldType::Enum(ref e) => {
                 let e = e.get_enum(desc);
                 Some(&*e.fully_qualified_fields[0].0)
@@ -219,13 +213,7 @@ impl FieldType {
         }
     }
 
-    fn has_lifetime(
-        &self,
-        desc: &FileDescriptor,
-        max_length: bool,
-        packed: bool,
-        ignore: &mut Vec<MessageIndex>,
-    ) -> bool {
+    fn has_lifetime(&self, desc: &FileDescriptor, max_length: bool, packed: bool, ignore: &mut Vec<MessageIndex>) -> bool {
         match *self {
             FieldType::Message(ref m) => m.get_message(desc).has_lifetime(desc, ignore),
             FieldType::Fixed64
@@ -240,7 +228,7 @@ impl FieldType {
         }
     }
 
-    fn rust_type(&self, desc: &FileDescriptor) -> Result<String> {
+    fn rust_type(&self, desc: &FileDescriptor, max_length: Option<u32>) -> Result<String> {
         Ok(match *self {
             FieldType::Int32 | FieldType::Sint32 | FieldType::Sfixed32 => "i32".to_string(),
             FieldType::Int64 | FieldType::Sint64 | FieldType::Sfixed64 => "i64".to_string(),
@@ -248,8 +236,8 @@ impl FieldType {
             FieldType::Uint64 | FieldType::Fixed64 => "u64".to_string(),
             FieldType::Double => "f64".to_string(),
             FieldType::Float => "f32".to_string(),
-            FieldType::String_ => "String<N>".to_string(),
-            FieldType::Bytes_ => "Vec<u8, N>".to_string(),
+            FieldType::String_ => format!("String<{}>", max_length.unwrap()).to_string(),
+            FieldType::Bytes_ => format!("Vec<u8, {}>", max_length.unwrap()).to_string(),
             FieldType::Bool => "bool".to_string(),
             FieldType::Enum(ref e) => {
                 let e = e.get_enum(desc);
@@ -257,13 +245,9 @@ impl FieldType {
             }
             FieldType::Message(ref msg) => {
                 let m = msg.get_message(desc);
-                let lifetime = if m.has_lifetime(desc, &mut Vec::new()) {
-                    "<'a>"
-                } else {
-                    ""
-                };
+                let lifetime = if m.has_lifetime(desc, &mut Vec::new()) { "<'a>" } else { "" };
                 format!("{}{}{}", m.get_modules(desc), m.name, lifetime)
-            },
+            }
             FieldType::MessageOrEnum(_) => unreachable!("Message / Enum not resolved"),
         })
     }
@@ -273,17 +257,13 @@ impl FieldType {
         Ok(match *self {
             FieldType::Message(ref msg) => {
                 let m = msg.get_message(desc);
-                format!(
-                    "r.read_message::<{}{}>(bytes)?",
-                    m.get_modules(desc),
-                    m.name
-                )
+                format!("r.read_message::<{}{}>(bytes)?", m.get_modules(desc), m.name)
             }
             FieldType::String_ => {
-                format!("r.read_{}(bytes)", self.proto_type())
+                format!("r.read_{}(bytes)?", self.proto_type())
             }
             FieldType::Bytes_ => {
-                format!("r.read_{}(bytes)", self.proto_type())
+                format!("r.read_{}(bytes)?", self.proto_type())
             }
             FieldType::MessageOrEnum(_) => unreachable!("Message / Enum not resolved"),
             _ => {
@@ -294,12 +274,9 @@ impl FieldType {
 
     fn get_size(&self, s: &str) -> String {
         match *self {
-            FieldType::Int32
-            | FieldType::Int64
-            | FieldType::Uint32
-            | FieldType::Uint64
-            | FieldType::Bool
-            | FieldType::Enum(_) => format!("sizeof_varint(*({}) as u64)", s),
+            FieldType::Int32 | FieldType::Int64 | FieldType::Uint32 | FieldType::Uint64 | FieldType::Bool | FieldType::Enum(_) => {
+                format!("sizeof_varint(*({}) as u64)", s)
+            }
             FieldType::Sint32 => format!("sizeof_sint32(*({}))", s),
             FieldType::Sint64 => format!("sizeof_sint64(*({}))", s),
 
@@ -331,9 +308,9 @@ impl FieldType {
             | FieldType::Fixed32
             | FieldType::Sfixed32
             | FieldType::Float => format!("write_{}(*{})", self.proto_type(), s),
-            
+
             FieldType::String_ => format!("write_string(*{})", s),
-            FieldType::Bytes_ => format!("write_bytes(*{})", s),
+            FieldType::Bytes_ => format!("write_bytes(*{}.as_slice())", s),
 
             FieldType::Message(_) => format!("write_message({})", s),
 
@@ -365,7 +342,7 @@ impl Field {
 
     fn sanitize_default(&mut self, desc: &FileDescriptor) -> Result<()> {
         if let Some(ref mut d) = self.default {
-            *d = match &*self.typ.rust_type(desc)? {
+            *d = match &*self.typ.rust_type(desc, self.max_length)? {
                 "u32" => format!("{}u32", *d),
                 "u64" => format!("{}u64", *d),
                 "i32" => format!("{}i32", *d),
@@ -393,34 +370,25 @@ impl Field {
     }
 
     fn has_regular_default(&self, desc: &FileDescriptor) -> bool {
-        self.default.is_none()
-            || self.default.as_ref().map(|d| &**d) == self.typ.regular_default(desc)
+        self.default.is_none() || self.default.as_ref().map(|d| &**d) == self.typ.regular_default(desc)
     }
 
     fn tag(&self) -> u32 {
         tag(self.number as u32, &self.typ, self.packed())
     }
 
-    fn write_definition<W: Write>(
-        &self,
-        w: &mut W,
-        desc: &FileDescriptor,
-        config: &Config,
-    ) -> Result<()> {
+    fn write_definition<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
         if self.deprecated {
             if config.add_deprecated_fields {
                 writeln!(w, "    #[deprecated]")?;
             } else {
-                return Ok(())
+                return Ok(());
             }
         }
         write!(w, "    pub {}: ", self.name)?;
-        let rust_type = self.typ.rust_type(desc)?;
+        let rust_type = self.typ.rust_type(desc, self.max_length)?;
         match self.frequency {
-            Frequency::Optional
-                if desc.syntax == Syntax::Proto2 && self.default.is_none()
-                    || self.typ.message().is_some() =>
-            {
+            Frequency::Optional if desc.syntax == Syntax::Proto2 && self.default.is_none() || self.typ.message().is_some() => {
                 writeln!(w, "Option<{}>,", rust_type)?
             }
             Frequency::Repeated => writeln!(w, "Vec<{}, {}>,", rust_type, self.max_length.unwrap())?,
@@ -438,10 +406,7 @@ impl Field {
         let name = &self.name;
         write!(w, "                Ok({}) => ", self.tag())?;
         match self.frequency {
-            Frequency::Optional
-                if desc.syntax == Syntax::Proto2 && self.default.is_none()
-                    || self.typ.message().is_some() =>
-            {
+            Frequency::Optional if desc.syntax == Syntax::Proto2 && self.default.is_none() || self.typ.message().is_some() => {
                 writeln!(w, "msg.{} = Some({}),", name, val)?
             }
             Frequency::Repeated if self.packed() && self.typ.is_fixed_size() => {
@@ -451,9 +416,7 @@ impl Field {
                 writeln!(w, "msg.{} = r.read_packed(bytes, |r, bytes| Ok({}))?,", name, val)?;
             }
             Frequency::Repeated => writeln!(w, "{{ msg.{}.push({}).unwrap(); }},", name, val)?,
-            Frequency::Required | Frequency::Optional => {
-                writeln!(w, "msg.{} = {},", name, val)?
-            }
+            Frequency::Required | Frequency::Optional => writeln!(w, "msg.{} = {},", name, val)?,
         }
         Ok(())
     }
@@ -466,9 +429,7 @@ impl Field {
         write!(w, "        + ")?;
         let tag_size = sizeof_varint(self.tag());
         match self.frequency {
-            Frequency::Optional
-                if desc.syntax == Syntax::Proto2 || self.typ.message().is_some() =>
-            {
+            Frequency::Optional if desc.syntax == Syntax::Proto2 || self.typ.message().is_some() => {
                 // TODO this might be incorrect behavior for proto2
                 match self.default.as_ref() {
                     None => {
@@ -492,53 +453,38 @@ impl Field {
                 }
             }
             Frequency::Optional => match self.typ {
+                FieldType::Bytes_ => writeln!(
+                    w,
+                    "if self.{}.is_empty() {{ 0 }} else {{ {} + {} }}",
+                    self.name,
+                    tag_size,
+                    self.typ.get_size(&format!("&self.{}", self.name))
+                )?,
                 _ => writeln!(
                     w,
                     "if self.{} == {} {{ 0 }} else {{ {} + {} }}",
                     self.name,
-                    self.default.as_ref().map_or_else(
-                        || self.typ.regular_default(desc).unwrap_or("None"),
-                        |s| s.as_str()
-                    ),
+                    self.default
+                        .as_ref()
+                        .map_or_else(|| self.typ.regular_default(desc).unwrap_or("None"), |s| s.as_str()),
                     tag_size,
                     self.typ.get_size(&format!("&self.{}", self.name))
                 )?,
             },
-            Frequency::Required => writeln!(
-                w,
-                "{} + {}",
-                tag_size,
-                self.typ.get_size(&format!("&self.{}", self.name))
-            )?,
+            Frequency::Required => writeln!(w, "{} + {}", tag_size, self.typ.get_size(&format!("&self.{}", self.name)))?,
             Frequency::Repeated => {
                 if self.packed() {
-                    write!(
-                        w,
-                        "if self.{}.is_empty() {{ 0 }} else {{ {} + ",
-                        self.name, tag_size
-                    )?;
+                    write!(w, "if self.{}.is_empty() {{ 0 }} else {{ {} + ", self.name, tag_size)?;
                     match self.typ.wire_type_num_non_packed() {
                         1 => writeln!(w, "sizeof_len(self.{}.len() * 8) }}", self.name)?,
                         5 => writeln!(w, "sizeof_len(self.{}.len() * 4) }}", self.name)?,
-                        _ => writeln!(
-                            w,
-                            "sizeof_len(self.{}.iter().map(|s| {}).sum::<usize>()) }}",
-                            self.name,
-                            self.typ.get_size("s")
-                        )?,
+                        _ => writeln!(w, "sizeof_len(self.{}.iter().map(|s| {}).sum::<usize>()) }}", self.name, self.typ.get_size("s"))?,
                     }
-                }
-                else {
+                } else {
                     match self.typ.wire_type_num_non_packed() {
                         1 => writeln!(w, "({} + 8) * self.{}.len()", tag_size, self.name)?,
                         5 => writeln!(w, "({} + 4) * self.{}.len()", tag_size, self.name)?,
-                        _ => writeln!(
-                            w,
-                            "self.{}.iter().map(|s| {} + {}).sum::<usize>()",
-                            self.name,
-                            tag_size,
-                            self.typ.get_size("s")
-                        )?,
+                        _ => writeln!(w, "self.{}.iter().map(|s| {} + {}).sum::<usize>()", self.name, tag_size, self.typ.get_size("s"))?,
                     }
                 }
             }
@@ -552,46 +498,48 @@ impl Field {
         }
 
         match self.frequency {
-            Frequency::Optional
-                if desc.syntax == Syntax::Proto2 || self.typ.message().is_some() =>
-            {
-                match self.default.as_ref() {
-                    None => {
-                        writeln!(
-                            w,
-                            "        if let Some(ref s) = \
+            Frequency::Optional if desc.syntax == Syntax::Proto2 || self.typ.message().is_some() => match self.default.as_ref() {
+                None => {
+                    writeln!(
+                        w,
+                        "        if let Some(ref s) = \
                              self.{} {{ w.write_with_tag({}, |w| w.{})?; }}",
-                            self.name,
-                            self.tag(),
-                            self.typ.get_write("s")
-                        )?;
-                    }
-                    Some(d) => {
-                        writeln!(
-                            w,
-                            "        if self.{} != {} {{ w.write_with_tag({}, |w| w.{})?; }}",
-                            self.name,
-                            d,
-                            self.tag(),
-                            self.typ
-                                .get_write(&format!("&self.{}", self.name))
-                        )?;
-                    }
+                        self.name,
+                        self.tag(),
+                        self.typ.get_write("s")
+                    )?;
                 }
-            }
+                Some(d) => {
+                    writeln!(
+                        w,
+                        "        if self.{} != {} {{ w.write_with_tag({}, |w| w.{})?; }}",
+                        self.name,
+                        d,
+                        self.tag(),
+                        self.typ.get_write(&format!("&self.{}", self.name))
+                    )?;
+                }
+            },
             Frequency::Optional => match self.typ {
+                FieldType::Bytes_ => {
+                    writeln!(
+                        w,
+                        "        if !self.{}.is_empty() {{ w.write_with_tag({}, |w| w.{})?; }}",
+                        self.name,
+                        self.tag(),
+                        self.typ.get_write(&format!("&self.{}", self.name))
+                    )?;
+                }
                 _ => {
                     writeln!(
                         w,
                         "        if self.{} != {} {{ w.write_with_tag({}, |w| w.{})?; }}",
                         self.name,
-                        self.default.as_ref().map_or_else(
-                            || self.typ.regular_default(desc).unwrap_or("None"),
-                            |s| s.as_str()
-                        ),
+                        self.default
+                            .as_ref()
+                            .map_or_else(|| self.typ.regular_default(desc).unwrap_or("None"), |s| s.as_str()),
                         self.tag(),
-                        self.typ
-                            .get_write(&format!("&self.{}", self.name))
+                        self.typ.get_write(&format!("&self.{}", self.name))
                     )?;
                 }
             },
@@ -600,17 +548,13 @@ impl Field {
                     w,
                     "        w.write_with_tag({}, |w| w.{})?;",
                     self.tag(),
-                    self.typ
-                        .get_write(&format!("&self.{}", self.name))
+                    self.typ.get_write(&format!("&self.{}", self.name))
                 )?;
             }
-            
-            Frequency::Repeated if self.packed() && self.typ.is_fixed_size() => writeln!(
-                w,
-                "        w.write_packed_fixed_with_tag({}, &self.{})?;",
-                self.tag(),
-                self.name
-            )?,
+
+            Frequency::Repeated if self.packed() && self.typ.is_fixed_size() => {
+                writeln!(w, "        w.write_packed_fixed_with_tag({}, &self.{})?;", self.tag(), self.name)?
+            }
             Frequency::Repeated if self.packed() => writeln!(
                 w,
                 "        w.write_packed_with_tag({}, &self.{}, |w, m| w.{}, &|m| {})?;",
@@ -634,17 +578,8 @@ impl Field {
 }
 
 fn get_modules(module: &str, imported: bool, desc: &FileDescriptor) -> String {
-    let skip = if desc.package.is_empty() && !imported {
-        1
-    } else {
-        0
-    };
-    module
-        .split('.')
-        .filter(|p| !p.is_empty())
-        .skip(skip)
-        .map(|p| format!("{}::", p))
-        .collect()
+    let skip = if desc.package.is_empty() && !imported { 1 } else { 0 };
+    module.split('.').filter(|p| !p.is_empty()).skip(skip).map(|p| format!("{}::", p)).collect()
 }
 
 #[derive(Debug, Clone, Default)]
@@ -680,9 +615,7 @@ impl Message {
             return false;
         }
         ignore.push(self.index.clone());
-        let res = self
-            .all_fields()
-            .any(|f| f.typ.has_lifetime(desc, f.max_length(), f.packed(), ignore));
+        let res = self.all_fields().any(|f| f.typ.has_lifetime(desc, f.max_length(), f.packed(), ignore));
         ignore.pop();
         res
     }
@@ -747,22 +680,13 @@ impl Message {
         Ok(())
     }
 
-    fn write_definition<W: Write>(
-        &self,
-        w: &mut W,
-        desc: &FileDescriptor,
-        config: &Config,
-    ) -> Result<()> {
+    fn write_definition<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
         let mut custom_struct_derive = config.custom_struct_derive.join(", ");
         if !custom_struct_derive.is_empty() {
             custom_struct_derive += ", ";
         }
 
-        writeln!(
-            w,
-            "#[derive({}Debug, Default, PartialEq, Clone)]",
-            custom_struct_derive
-        )?;
+        writeln!(w, "#[derive({}Debug, Default, PartialEq, Clone)]", custom_struct_derive)?;
 
         if let Some(repr) = &config.custom_repr {
             writeln!(w, "#[repr({})]", repr)?;
@@ -790,11 +714,7 @@ impl Message {
         Ok(())
     }
 
-    fn write_impl_message_info<W: Write>(
-        &self,
-        w: &mut W,
-        desc: &FileDescriptor,
-    ) -> Result<()> {
+    fn write_impl_message_info<W: Write>(&self, w: &mut W, desc: &FileDescriptor) -> Result<()> {
         let mut ignore = Vec::new();
         ignore.push(self.index.clone());
         if self.has_lifetime(desc, &mut ignore) {
@@ -802,27 +722,15 @@ impl Message {
         } else {
             writeln!(w, "impl MessageInfo for {} {{", self.name)?;
         }
-        writeln!(
-            w,
-            "    const PATH : &'static str = \"{}.{}\";",
-            self.module, self.name
-        )?;
+        writeln!(w, "    const PATH : &'static str = \"{}.{}\";", self.module, self.name)?;
         writeln!(w, "}}")?;
         Ok(())
     }
 
-    fn write_impl_message_read<W: Write>(
-        &self,
-        w: &mut W,
-        desc: &FileDescriptor,
-        config: &Config,
-    ) -> Result<()> {
+    fn write_impl_message_read<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
         if self.is_unit() {
             writeln!(w, "impl<'a> MessageRead<'a> for {} {{", self.name)?;
-            writeln!(
-                w,
-                "    fn from_reader(r: &mut BytesReader, _: &[u8]) -> Result<Self> {{"
-            )?;
+            writeln!(w, "    fn from_reader(r: &mut BytesReader, _: &[u8]) -> Result<Self> {{")?;
             writeln!(w, "        r.read_to_end();")?;
             writeln!(w, "        Ok(Self::default())")?;
             writeln!(w, "    }}")?;
@@ -834,34 +742,19 @@ impl Message {
         ignore.push(self.index.clone());
         if self.has_lifetime(desc, &mut ignore) {
             writeln!(w, "impl<'a> MessageRead<'a> for {}<'a> {{", self.name)?;
-            writeln!(
-                w,
-                "    fn from_reader(r: &mut BytesReader, bytes: &'a [u8]) -> Result<Self> {{"
-            )?;
+            writeln!(w, "    fn from_reader(r: &mut BytesReader, bytes: &'a [u8]) -> Result<Self> {{")?;
         } else {
             writeln!(w, "impl<'a> MessageRead<'a> for {} {{", self.name)?;
-            writeln!(
-                w,
-                "    fn from_reader(r: &mut BytesReader, bytes: &'a [u8]) -> Result<Self> {{"
-            )?;
+            writeln!(w, "    fn from_reader(r: &mut BytesReader, bytes: &'a [u8]) -> Result<Self> {{")?;
         }
 
-        let unregular_defaults = self
-            .fields
-            .iter()
-            .filter(|f| !f.has_regular_default(desc))
-            .collect::<Vec<_>>();
+        let unregular_defaults = self.fields.iter().filter(|f| !f.has_regular_default(desc)).collect::<Vec<_>>();
         if unregular_defaults.is_empty() {
             writeln!(w, "        let mut msg = Self::default();")?;
         } else {
             writeln!(w, "        let mut msg = {} {{", self.name)?;
             for f in unregular_defaults {
-                writeln!(
-                    w,
-                    "            {}: {},",
-                    f.name,
-                    f.default.as_ref().unwrap()
-                )?;
+                writeln!(w, "            {}: {},", f.name, f.default.as_ref().unwrap())?;
             }
             writeln!(w, "            ..Self::default()")?;
             writeln!(w, "        }};")?;
@@ -874,10 +767,7 @@ impl Message {
         for o in &self.oneofs {
             o.write_match_tag(w, desc, config)?;
         }
-        writeln!(
-            w,
-            "                Ok(t) => {{ r.read_unknown(bytes, t)?; }}"
-        )?;
+        writeln!(w, "                Ok(t) => {{ r.read_unknown(bytes, t)?; }}")?;
         writeln!(w, "                Err(e) => return Err(e),")?;
         writeln!(w, "            }}")?;
         writeln!(w, "        }}")?;
@@ -891,12 +781,7 @@ impl Message {
         Ok(())
     }
 
-    fn write_impl_message_write<W: Write>(
-        &self,
-        w: &mut W,
-        desc: &FileDescriptor,
-        config: &Config,
-    ) -> Result<()> {
+    fn write_impl_message_write<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
         if self.is_unit() {
             writeln!(w, "impl MessageWrite for {} {{ }}", self.name)?;
             return Ok(());
@@ -930,10 +815,7 @@ impl Message {
     }
 
     fn write_write_message<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
-        writeln!(
-            w,
-            "    fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> Result<()> {{"
-        )?;
+        writeln!(w, "    fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> Result<()> {{")?;
         for f in &self.fields {
             f.write_write(w, desc, config)?;
         }
@@ -948,14 +830,8 @@ impl Message {
     fn sanity_checks(&self, desc: &FileDescriptor) -> Result<()> {
         for f in self.all_fields() {
             // check reserved
-            if self
-                .reserved_names
-                .as_ref()
-                .map_or(false, |names| names.contains(&f.name))
-                || self
-                    .reserved_nums
-                    .as_ref()
-                    .map_or(false, |nums| nums.contains(&f.number))
+            if self.reserved_names.as_ref().map_or(false, |names| names.contains(&f.name))
+                || self.reserved_nums.as_ref().map_or(false, |nums| nums.contains(&f.number))
             {
                 return Err(Error::InvalidMessage(format!(
                     "Error in message {}\n\
@@ -968,11 +844,13 @@ impl Message {
             if let Some(var) = f.default.as_ref() {
                 if let FieldType::Enum(ref e) = f.typ {
                     let e = e.get_enum(desc);
-                    e.fields.iter().find(|&(ref name, _)| name == var)
-                    .ok_or_else(|| Error::InvalidDefaultEnum(format!(
-                                "Error in message {}\n\
+                    e.fields.iter().find(|&(ref name, _)| name == var).ok_or_else(|| {
+                        Error::InvalidDefaultEnum(format!(
+                            "Error in message {}\n\
                                 Enum field {:?} has a default value '{}' which is not valid for enum index {:?}",
-                                self.name, f, var, e)))?;
+                            self.name, f, var, e
+                        ))
+                    })?;
                 }
             }
         }
@@ -993,10 +871,7 @@ impl Message {
         } else {
             self.package = package.to_string();
             self.module = module.to_string();
-            (
-                format!("{}.{}", package, self.name),
-                format!("{}.mod_{}", module, self.name),
-            )
+            (format!("{}.{}", package, self.name), format!("{}.mod_{}", module, self.name))
         };
 
         for m in &mut self.messages {
@@ -1009,7 +884,7 @@ impl Message {
             m.set_package(&child_package, &child_module);
         }
     }
-    
+
     fn set_repeated_as_packed(&mut self) {
         for f in self.all_fields_mut() {
             if f.packed.is_none() {
@@ -1058,17 +933,13 @@ impl Message {
     /// Return an iterator producing references to all the `Field`s of `self`,
     /// including both direct and `oneof` fields.
     pub fn all_fields(&self) -> impl Iterator<Item = &Field> {
-        self.fields
-            .iter()
-            .chain(self.oneofs.iter().flat_map(|o| o.fields.iter()))
+        self.fields.iter().chain(self.oneofs.iter().flat_map(|o| o.fields.iter()))
     }
 
     /// Return an iterator producing mutable references to all the `Field`s of
     /// `self`, including both direct and `oneof` fields.
     fn all_fields_mut(&mut self) -> impl Iterator<Item = &mut Field> {
-        self.fields
-            .iter_mut()
-            .chain(self.oneofs.iter_mut().flat_map(|o| o.fields.iter_mut()))
+        self.fields.iter_mut().chain(self.oneofs.iter_mut().flat_map(|o| o.fields.iter_mut()))
     }
 }
 
@@ -1111,11 +982,7 @@ impl Enumerator {
     fn set_package(&mut self, package: &str, module: &str) {
         self.package = package.to_string();
         self.module = module.to_string();
-        self.partially_qualified_fields = self
-            .fields
-            .iter()
-            .map(|f| (format!("{}::{}", &self.name, f.0), f.1))
-            .collect();
+        self.partially_qualified_fields = self.fields.iter().map(|f| (format!("{}::{}", &self.name, f.0), f.1)).collect();
         self.fully_qualified_fields = self
             .partially_qualified_fields
             .iter()
@@ -1264,7 +1131,7 @@ impl OneOf {
                 }
             }
 
-            let rust_type = f.typ.rust_type(desc)?;
+            let rust_type = f.typ.rust_type(desc, None)?;
             writeln!(w, "    {}({}),", f.name, rust_type)?;
         }
         writeln!(w, "    None,")?;
@@ -1277,16 +1144,11 @@ impl OneOf {
         }
     }
 
-    fn generate_impl_from_for_enums<W: Write>(
-        &self,
-        w: &mut W,
-        desc: &FileDescriptor,
-        config: &Config,
-    ) -> Result<()> {
+    fn generate_impl_from_for_enums<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
         // For the first of each enumeration type, generate an impl From<> for it.
         let mut handled_fields = Vec::new();
         for f in self.fields.iter().filter(|f| !f.deprecated || config.add_deprecated_fields) {
-            let rust_type = f.typ.rust_type(desc)?;
+            let rust_type = f.typ.rust_type(desc, None)?;
             if handled_fields.contains(&rust_type) {
                 continue;
             }
@@ -1317,21 +1179,9 @@ impl OneOf {
 
     fn write_message_definition<W: Write>(&self, w: &mut W, desc: &FileDescriptor) -> Result<()> {
         if self.has_lifetime(desc) {
-            writeln!(
-                w,
-                "    pub {}: {}OneOf{}<'a>,",
-                self.name,
-                self.get_modules(desc),
-                self.name
-            )?;
+            writeln!(w, "    pub {}: {}OneOf{}<'a>,", self.name, self.get_modules(desc), self.name)?;
         } else {
-            writeln!(
-                w,
-                "    pub {}: {}OneOf{},",
-                self.name,
-                self.get_modules(desc),
-                self.name
-            )?;
+            writeln!(w, "    pub {}: {}OneOf{},", self.name, self.get_modules(desc), self.name)?;
         }
         Ok(())
     }
@@ -1379,12 +1229,7 @@ impl OneOf {
                 )?;
             }
         }
-        writeln!(
-            w,
-            "            {}OneOf{}::None => 0,",
-            self.get_modules(desc),
-            self.name
-        )?;
+        writeln!(w, "            {}OneOf{}::None => 0,", self.get_modules(desc), self.name)?;
         write!(w, "    }}")?;
         Ok(())
     }
@@ -1402,12 +1247,7 @@ impl OneOf {
                 f.typ.get_write("m")
             )?;
         }
-        writeln!(
-            w,
-            "            {}OneOf{}::None => {{}},",
-            self.get_modules(desc),
-            self.name
-        )?;
+        writeln!(w, "            {}OneOf{}::None => {{}},", self.get_modules(desc), self.name)?;
         write!(w, "    }}")?;
         Ok(())
     }
@@ -1497,20 +1337,10 @@ impl FileDescriptor {
             let imported = |b| if b { " imported" } else { "" };
             println!("source will be written to {}\n", out_file.display());
             for m in &desc.messages {
-                println!(
-                    "message {} module {}{}",
-                    m.name,
-                    m.module,
-                    imported(m.imported)
-                );
+                println!("message {} module {}{}", m.name, m.module, imported(m.imported));
             }
             for e in &desc.enums {
-                println!(
-                    "enum {} module {}{}",
-                    e.name,
-                    e.module,
-                    imported(e.imported)
-                );
+                println!("enum {} module {}{}", e.name, e.module, imported(e.imported));
             }
             return Ok(());
         }
@@ -1589,9 +1419,7 @@ impl FileDescriptor {
                     path.join(Path::new(&import_path))
                 } else {
                     let import_path = import.to_string_lossy().replace("/", "\\");
-                    in_file
-                        .parent()
-                        .map_or_else(|| path.join(&import_path), |p| p.join(path).join(&import))
+                    in_file.parent().map_or_else(|| path.join(&import_path), |p| p.join(path).join(&import))
                 };
                 if candidate.exists() {
                     matching_file = Some(candidate);
@@ -1599,10 +1427,7 @@ impl FileDescriptor {
                 }
             }
             if matching_file.is_none() {
-                return Err(Error::InvalidImport(format!(
-                    "file {} not found on import path",
-                    import.display()
-                )));
+                return Err(Error::InvalidImport(format!("file {} not found on import path", import.display())));
             }
             let proto_file = matching_file.unwrap();
             let mut f = FileDescriptor::read_proto(&proto_file, import_search_path)?;
@@ -1706,12 +1531,7 @@ impl FileDescriptor {
                     let cycle = &scc[i..i + cycle + 1];
                     debug!("cycle: {:?}", &cycle);
                     if is_cycle(cycle, self) {
-                        return Err(Error::Cycle(
-                            cycle
-                                .iter()
-                                .map(|m| m.get_message(self).name.clone())
-                                .collect(),
-                        ));
+                        return Err(Error::Cycle(cycle.iter().map(|m| m.get_message(self).name.clone()).collect()));
                     }
                 }
             }
@@ -1773,11 +1593,7 @@ impl FileDescriptor {
     fn resolve_types(&mut self) -> Result<()> {
         let (full_msgs, full_enums) = self.get_full_names();
 
-        fn rec_resolve_types(
-            m: &mut Message,
-            full_msgs: &HashMap<String, MessageIndex>,
-            full_enums: &HashMap<String, EnumIndex>,
-        ) -> Result<()> {
+        fn rec_resolve_types(m: &mut Message, full_msgs: &HashMap<String, MessageIndex>, full_enums: &HashMap<String, EnumIndex>) -> Result<()> {
             // Interestingly, we can't call all_fields_mut to iterate over the
             // fields here: writing out the field traversal as below lets Rust
             // split m's mutable borrow, permitting the loop body to use fields
@@ -1797,11 +1613,7 @@ impl FileDescriptor {
                     } else if m.package.is_empty() {
                         vec![name.clone(), format!("{}.{}", m.name, name)]
                     } else {
-                        vec![
-                            name.clone(),
-                            format!("{}.{}", m.package, name),
-                            format!("{}.{}.{}", m.package, m.name, name),
-                        ]
+                        vec![name.clone(), format!("{}.{}", m.package, name), format!("{}.{}.{}", m.package, m.name, name)]
                     };
                     for name in &test_names {
                         if let Some(msg) = full_msgs.get(&*name) {
@@ -1828,11 +1640,7 @@ impl FileDescriptor {
     }
 
     fn write<W: Write>(&self, w: &mut W, filename: &str, config: &Config) -> Result<()> {
-        println!(
-            "Found {} messages, and {} enums",
-            self.messages.len(),
-            self.enums.len()
-        );
+        println!("Found {} messages, and {} enums", self.messages.len(), self.enums.len());
         if config.headers {
             self.write_headers(w, filename, config)?;
         }
@@ -1847,11 +1655,7 @@ impl FileDescriptor {
     }
 
     fn write_headers<W: Write>(&self, w: &mut W, filename: &str, config: &Config) -> Result<()> {
-        writeln!(
-            w,
-            "// Automatically generated rust module for '{}' file",
-            filename
-        )?;
+        writeln!(w, "// Automatically generated rust module for '{}' file", filename)?;
         writeln!(w)?;
         writeln!(w, "#![allow(non_snake_case)]")?;
         writeln!(w, "#![allow(non_upper_case_globals)]")?;
@@ -1875,21 +1679,16 @@ impl FileDescriptor {
     }
 
     fn write_uses<W: Write>(&self, w: &mut W, config: &Config) -> Result<()> {
-        if self.messages.iter().any(|m|
-            m.all_fields().any(|f| f.max_length())
-        ) {
+        if self.messages.iter().any(|m| m.all_fields().any(|f| f.max_length())) {
             writeln!(w, "use heapless::Vec;")?;
         }
 
-        if ! self.enums.is_empty() {
+        if !self.enums.is_empty() {
             writeln!(w, "use defmt::Format;")?;
         }
 
         if self.messages.iter().all(|m| m.is_unit()) {
-            writeln!(
-                w,
-                "use quick_protobuf::{{BytesReader, Result, MessageInfo, MessageRead, MessageWrite}};"
-            )?;
+            writeln!(w, "use quick_protobuf::{{BytesReader, Result, MessageInfo, MessageRead, MessageWrite}};")?;
             return Ok(());
         }
 

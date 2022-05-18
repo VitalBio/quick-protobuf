@@ -85,7 +85,7 @@ impl<W: WriterBackend> Writer<W> {
     }
 
     /// Writes a `int64` which is internally coded as a `varint`
-    
+
     pub fn write_int64(&mut self, v: i64) -> Result<()> {
         self.write_varint(v as u64)
     }
@@ -211,17 +211,11 @@ impl<W: WriterBackend> Writer<W> {
         self.write_tag(tag)?;
         write(self)
     }
-    
+
     /// Writes tag then repeated field
     ///
     /// If array is empty, then do nothing (do not even write the tag)
-    pub fn write_packed_with_tag<M, F, S>(
-        &mut self,
-        tag: u32,
-        v: &[M],
-        mut write: F,
-        size: &S,
-    ) -> Result<()>
+    pub fn write_packed_with_tag<M, F, S>(&mut self, tag: u32, v: &[M], mut write: F, size: &S) -> Result<()>
     where
         F: FnMut(&mut Self, &M) -> Result<()>,
         S: Fn(&M) -> usize,
@@ -237,7 +231,7 @@ impl<W: WriterBackend> Writer<W> {
         }
         Ok(())
     }
-    
+
     /// Writes tag then repeated field
     ///
     /// If array is empty, then do nothing (do not even write the tag)
@@ -255,12 +249,7 @@ impl<W: WriterBackend> Writer<W> {
     /// Writes tag then repeated field with fixed length item size
     ///
     /// If array is empty, then do nothing (do not even write the tag)
-    pub fn write_packed_fixed_size_with_tag<M>(
-        &mut self,
-        tag: u32,
-        v: &[M],
-        item_size: usize,
-    ) -> Result<()> {
+    pub fn write_packed_fixed_size_with_tag<M>(&mut self, tag: u32, v: &[M], item_size: usize) -> Result<()> {
         if v.is_empty() {
             return Ok(());
         }
@@ -271,14 +260,7 @@ impl<W: WriterBackend> Writer<W> {
     }
 
     /// Write entire map
-    pub fn write_map<FK, FV>(
-        &mut self,
-        size: usize,
-        tag_key: u32,
-        mut write_key: FK,
-        tag_val: u32,
-        mut write_val: FV,
-    ) -> Result<()>
+    pub fn write_map<FK, FV>(&mut self, size: usize, tag_key: u32, mut write_key: FK, tag_val: u32, mut write_val: FV) -> Result<()>
     where
         FK: FnMut(&mut Self) -> Result<()>,
         FV: FnMut(&mut Self) -> Result<()>,

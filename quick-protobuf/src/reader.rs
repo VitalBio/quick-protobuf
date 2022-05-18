@@ -75,10 +75,7 @@ pub struct BytesReader {
 impl BytesReader {
     /// Creates a new reader from chunks of data
     pub fn from_bytes(bytes: &[u8]) -> BytesReader {
-        BytesReader {
-            start: 0,
-            end: bytes.len(),
-        }
+        BytesReader { start: 0, end: bytes.len() }
     }
 
     /// Reads next tag, `None` if all bytes have been read
@@ -241,11 +238,7 @@ impl BytesReader {
 
     /// Reads fixed64 (little endian u64)
     fn read_fixed<M, F: Fn(&[u8]) -> M>(&mut self, bytes: &[u8], len: usize, read: F) -> Result<M> {
-        let v = read(
-            &bytes
-                .get(self.start..self.start + len)
-                .ok_or_else(|| Error::UnexpectedEndOfBuffer)?,
-        );
+        let v = read(&bytes.get(self.start..self.start + len).ok_or_else(|| Error::UnexpectedEndOfBuffer)?);
         self.start += len;
         Ok(v)
     }
@@ -314,16 +307,17 @@ impl BytesReader {
 
     /// Reads bytes (Vec<u8>)
     #[inline]
-    pub fn read_bytes<'a>(&mut self, bytes: &'a [u8]) -> Result<&'a [u8]> {
-        self.read_len_varint(bytes, |r, b| Ok(&b[r.start..r.end]))
+    pub fn read_bytes<'a, const N: usize>(&mut self, bytes: &'a [u8]) -> Result<Vec<u8, N>> {
+        self.read_len_varint(bytes, |r, b| {
+            let v = Vec::<u8, N>::from_slice(&b[r.start..r.end]).map_err(|_| Error::UnexpectedEndOfBuffer)?;
+            Ok(v)
+        })
     }
 
     /// Reads string (String)
     #[inline]
     pub fn read_string<'a>(&mut self, bytes: &'a [u8]) -> Result<&'a str> {
-        self.read_len_varint(bytes, |r, b| {
-            ::core::str::from_utf8(&b[r.start..r.end]).map_err(|e| e.into())
-        })
+        self.read_len_varint(bytes, |r, b| ::core::str::from_utf8(&b[r.start..r.end]).map_err(|e| e.into()))
     }
 
     /// Reads packed repeated field (heapless::Vec<M,N>)
@@ -337,7 +331,7 @@ impl BytesReader {
     {
         self.read_len_varint(bytes, |r, b| {
             let mut v = Vec::<M, N>::new();
-            
+
             while !r.is_eof() && !v.is_full() {
                 v.push(read(r, b)?).map_err(|_| Error::UnexpectedEndOfBuffer)?;
             }
@@ -356,12 +350,7 @@ impl BytesReader {
             return Err(Error::UnexpectedEndOfBuffer);
         }
         let n = len / ::core::mem::size_of::<M>();
-        let slice = unsafe {
-            ::core::slice::from_raw_parts(
-                bytes.get_unchecked(self.start) as *const u8 as *const M,
-                n,
-            )
-        };
+        let slice = unsafe { ::core::slice::from_raw_parts(bytes.get_unchecked(self.start) as *const u8 as *const M, n) };
         self.start += len;
         Ok(slice)
     }
@@ -375,7 +364,7 @@ impl BytesReader {
     {
         self.read_len_varint(bytes, M::from_reader)
     }
-    
+
     /// Reads a nested message
     ///
     /// The length is computed from the size of the message `bytes`
@@ -400,12 +389,7 @@ impl BytesReader {
     }
 
     /// Reads a map item: (key, value)
-    pub fn read_map<'a, K, V, F, G>(
-        &mut self,
-        bytes: &'a [u8],
-        mut read_key: F,
-        mut read_val: G,
-    ) -> Result<(K, V)>
+    pub fn read_map<'a, K, V, F, G>(&mut self, bytes: &'a [u8], mut read_key: F, mut read_val: G) -> Result<(K, V)>
     where
         F: FnMut(&mut BytesReader, &'a [u8]) -> Result<K>,
         G: FnMut(&mut BytesReader, &'a [u8]) -> Result<V>,
