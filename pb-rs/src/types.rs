@@ -391,7 +391,12 @@ impl Field {
             Frequency::Optional if desc.syntax == Syntax::Proto2 && self.default.is_none() || self.typ.message().is_some() => {
                 writeln!(w, "Option<{}>,", rust_type)?
             }
-            Frequency::Repeated => writeln!(w, "Vec<{}, {}>,", rust_type, self.max_length.unwrap())?,
+            Frequency::Repeated => writeln!(
+                w,
+                "Vec<{}, {}>,",
+                rust_type,
+                self.max_length.expect("Required to have a maximum length defined for repeated fields")
+            )?,
             Frequency::Required | Frequency::Optional => writeln!(w, "{},", rust_type)?,
         }
         Ok(())
