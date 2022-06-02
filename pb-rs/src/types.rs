@@ -236,8 +236,8 @@ impl FieldType {
             FieldType::Uint64 | FieldType::Fixed64 => "u64".to_string(),
             FieldType::Double => "f64".to_string(),
             FieldType::Float => "f32".to_string(),
-            FieldType::String_ => format!("String<{}>", max_length.unwrap()).to_string(),
-            FieldType::Bytes_ => format!("Vec<u8, {}>", max_length.unwrap()).to_string(),
+            FieldType::String_ => format!("String<{}>", max_length.expect("Required to have a maximum length defined for string fields")).to_string(),
+            FieldType::Bytes_ => format!("Vec<u8, {}>", max_length.expect("Required to have a maximum length defined for bytes fields")).to_string(),
             FieldType::Bool => "bool".to_string(),
             FieldType::Enum(ref e) => {
                 let e = e.get_enum(desc);
@@ -310,7 +310,7 @@ impl FieldType {
             | FieldType::Float => format!("write_{}(*{})", self.proto_type(), s),
 
             FieldType::String_ => format!("write_string(*{})", s),
-            FieldType::Bytes_ => format!("write_bytes(*{}.as_slice())", s),
+            FieldType::Bytes_ => format!("write_bytes({}.as_slice())", s),
 
             FieldType::Message(_) => format!("write_message({})", s),
 
@@ -1136,7 +1136,7 @@ impl OneOf {
                 }
             }
 
-            let rust_type = f.typ.rust_type(desc, None)?;
+            let rust_type = f.typ.rust_type(desc, f.max_length)?;
             writeln!(w, "    {}({}),", f.name, rust_type)?;
         }
         writeln!(w, "    None,")?;
@@ -1153,7 +1153,7 @@ impl OneOf {
         // For the first of each enumeration type, generate an impl From<> for it.
         let mut handled_fields = Vec::new();
         for f in self.fields.iter().filter(|f| !f.deprecated || config.add_deprecated_fields) {
-            let rust_type = f.typ.rust_type(desc, None)?;
+            let rust_type = f.typ.rust_type(desc, f.max_length)?;
             if handled_fields.contains(&rust_type) {
                 continue;
             }
