@@ -11,7 +11,7 @@ use core::fmt::Debug;
 
 use crate::errors::{Error, Result};
 use crate::message::MessageRead;
-use heapless::Vec;
+use heapless::{String, Vec};
 
 use byteorder::ByteOrder;
 use byteorder::LittleEndian as LE;
@@ -316,8 +316,14 @@ impl BytesReader {
 
     /// Reads string (String)
     #[inline]
-    pub fn read_string<'a>(&mut self, bytes: &'a [u8]) -> Result<&'a str> {
-        self.read_len_varint(bytes, |r, b| ::core::str::from_utf8(&b[r.start..r.end]).map_err(|e| e.into()))
+    pub fn read_string<'a, const N: usize>(&mut self, bytes: &'a [u8]) -> Result<String<N>> {
+        // self.read_len_varint(bytes, |r, b| ::core::str::from_utf8(&b[r.start..r.end]).map_err(|e| e.into()))
+        self.read_len_varint(bytes, |r, b| {
+            let s = ::core::str::from_utf8(&b[r.start..r.end]).map_err(Error::Utf8)?;
+            let mut v = String::<N>::new();
+            v.push_str(s).map_err(|_| Error::UnexpectedEndOfBuffer)?;
+            Ok(v)
+        })
     }
 
     /// Reads packed repeated field (heapless::Vec<M,N>)

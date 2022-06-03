@@ -309,7 +309,7 @@ impl FieldType {
             | FieldType::Sfixed32
             | FieldType::Float => format!("write_{}(*{})", self.proto_type(), s),
 
-            FieldType::String_ => format!("write_string(*{})", s),
+            FieldType::String_ => format!("write_string({}.as_str())", s),
             FieldType::Bytes_ => format!("write_bytes({}.as_slice())", s),
 
             FieldType::Message(_) => format!("write_message({})", s),
@@ -1684,8 +1684,20 @@ impl FileDescriptor {
     }
 
     fn write_uses<W: Write>(&self, w: &mut W, config: &Config) -> Result<()> {
-        if self.messages.iter().any(|m| m.all_fields().any(|f| f.max_length())) {
+        if self
+            .messages
+            .iter()
+            .any(|m| m.all_fields().any(|f| f.max_length() && f.typ != FieldType::String_))
+        {
             writeln!(w, "use heapless::Vec;")?;
+        }
+
+        if self
+            .messages
+            .iter()
+            .any(|m| m.all_fields().any(|f| f.max_length() && f.typ == FieldType::String_))
+        {
+            writeln!(w, "use heapless::String;")?;
         }
 
         if !self.enums.is_empty() {
