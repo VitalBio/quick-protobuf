@@ -1,7 +1,7 @@
 //! A module to handle all errors
 
 /// An error enum
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Error {
     /// Io error
     Io,

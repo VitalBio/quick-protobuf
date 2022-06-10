@@ -289,15 +289,18 @@ pub fn serialize_into_slice<M: MessageWrite>(message: &M, out: &mut [u8]) -> Res
 
 /// Serialize a `MessageWrite` into a u8 heapless::vec
 pub fn serialize_into_vec<M: MessageWrite, const T: usize>(message: &M, out: &mut Vec<u8, T>) -> Result<()> {
-    let len = message.get_size();
-    if out.capacity() < len {
+    // Make sure there's enough room
+    let msg_len = message.get_size();
+    let out_len = out.len();
+    let buffer_len_left = out.capacity() - out_len;
+    if msg_len > buffer_len_left {
         return Err(Error::OutputBufferTooSmall);
     }
-    out.resize_default(len).unwrap();
-    {
-        let mut writer = Writer::new(BytesWriter::new(out));
-        writer.write_message_without_len(message)?;
-    }
+
+    // Resize and serialize message into buffer
+    out.resize_default(out_len + msg_len).unwrap();
+    let mut writer = Writer::new(BytesWriter::new(&mut out[out_len..]));
+    writer.write_message_without_len(message)?;
 
     Ok(())
 }
