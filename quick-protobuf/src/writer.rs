@@ -2,7 +2,7 @@
 
 use crate::errors::{Error, Result};
 use crate::message::MessageWrite;
-// use crate::sizeofs::sizeof_varint;
+use crate::sizeofs::sizeof_varint;
 
 use byteorder::{ByteOrder, LittleEndian as LE};
 use heapless::Vec;
@@ -288,9 +288,14 @@ pub fn serialize_into_slice<M: MessageWrite>(message: &M, out: &mut [u8]) -> Res
 }
 
 /// Serialize a `MessageWrite` into a u8 heapless::vec
-pub fn serialize_into_vec<M: MessageWrite, const T: usize>(message: &M, out: &mut Vec<u8, T>) -> Result<()> {
+pub fn serialize_into_vec<M: MessageWrite, const T: usize>(message: &M, out: &mut Vec<u8, T>, length_prefix: bool) -> Result<()> {
     // Make sure there's enough room
-    let msg_len = message.get_size();
+    let msg_len = if length_prefix {
+        let len = message.get_size();
+        len + sizeof_varint(len as u64)
+    } else {
+        message.get_size()
+    };
     let out_len = out.len();
     let buffer_len_left = out.capacity() - out_len;
     if msg_len > buffer_len_left {
@@ -300,7 +305,11 @@ pub fn serialize_into_vec<M: MessageWrite, const T: usize>(message: &M, out: &mu
     // Resize and serialize message into buffer
     out.resize_default(out_len + msg_len).unwrap();
     let mut writer = Writer::new(BytesWriter::new(&mut out[out_len..]));
-    writer.write_message_without_len(message)?;
+    if length_prefix {
+        writer.write_message(message)?;
+    } else {
+        writer.write_message_without_len(message)?;
+    }
 
     Ok(())
 }

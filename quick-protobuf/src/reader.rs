@@ -456,9 +456,13 @@ impl BytesReader {
 }
 
 /// Deserialize a `MessageRead from a `&[u8]`
-pub fn deserialize_from_slice<'a, M: MessageRead<'a>>(bytes: &'a [u8]) -> Result<M> {
+pub fn deserialize_from_slice<'a, M: MessageRead<'a>>(bytes: &'a [u8], length_prefix: bool) -> Result<M> {
     let mut reader = BytesReader::from_bytes(&bytes);
-    reader.read_message_without_len::<M>(&bytes)
+    if length_prefix {
+        reader.read_message::<M>(&bytes)
+    } else {
+        reader.read_message_without_len::<M>(&bytes)
+    }
 }
 
 #[test]
