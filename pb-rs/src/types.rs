@@ -1420,11 +1420,9 @@ impl FileDescriptor {
             let mut matching_file = None;
             for path in import_search_path {
                 let candidate = if path.is_absolute() {
-                    let import_path = import.to_string_lossy().replace("/", "\\");
-                    path.join(Path::new(&import_path))
+                    path.join(&import)
                 } else {
-                    let import_path = import.to_string_lossy().replace("/", "\\");
-                    in_file.parent().map_or_else(|| path.join(&import_path), |p| p.join(path).join(&import))
+                    in_file.parent().map_or_else(|| path.join(&import), |p| p.join(path).join(&import))
                 };
                 if candidate.exists() {
                     matching_file = Some(candidate);
