@@ -194,7 +194,7 @@ impl FieldType {
             FieldType::Fixed64 => Some("0u64"),
             FieldType::Sfixed64 => Some("0i64"),
             FieldType::Double => Some("0f64"),
-            FieldType::String_ => Some("String::default()"),
+            FieldType::String_ => Some("\"\""),
             FieldType::Bytes_ => None,
             FieldType::Enum(ref e) => {
                 let e = e.get_enum(desc);
