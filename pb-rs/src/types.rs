@@ -661,7 +661,7 @@ impl Message {
             writeln!(w)?;
         }
 
-        if !(self.messages.is_empty() && self.enums.is_empty() && self.oneofs.is_empty()) {
+        if !self.messages.is_empty() || !self.enums.is_empty() || (!self.oneofs.is_empty() && !(self.fields.is_empty() && self.oneofs.len() == 1)) {
             writeln!(w)?;
             writeln!(w, "pub mod mod_{} {{", self.name)?;
             writeln!(w)?;
@@ -674,8 +674,10 @@ impl Message {
             for e in &self.enums {
                 e.write(w)?;
             }
-            for o in &self.oneofs {
-                o.write(w, desc, config)?;
+            if !self.fields.is_empty() || self.oneofs.len() != 1 {
+                for o in &self.oneofs {
+                    o.write(w, desc, config, None)?;
+                }
             }
 
             writeln!(w)?;
@@ -686,6 +688,10 @@ impl Message {
     }
 
     fn write_definition<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
+        if self.fields.is_empty() && self.oneofs.len() == 1 {
+            return self.oneofs[0].write(w, desc, config, Some(&self.name));
+        }
+
         let mut custom_struct_derive = config.custom_struct_derive.join(", ");
         if !custom_struct_derive.is_empty() {
             custom_struct_derive += ", ";
@@ -701,6 +707,7 @@ impl Message {
             writeln!(w, "pub struct {} {{ }}", self.name)?;
             return Ok(());
         }
+
 
         let mut ignore = Vec::new();
         ignore.push(self.index.clone());
@@ -753,29 +760,40 @@ impl Message {
             writeln!(w, "    fn from_reader(r: &mut BytesReader, bytes: &'a [u8]) -> Result<Self> {{")?;
         }
 
-        let unregular_defaults = self.fields.iter().filter(|f| !f.has_regular_default(desc)).collect::<Vec<_>>();
-        if unregular_defaults.is_empty() {
+        if self.fields.is_empty() && self.oneofs.len() == 1 {
             writeln!(w, "        let mut msg = Self::default();")?;
+            writeln!(w, "        while !r.is_eof() {{")?;
+            writeln!(w, "            match r.next_tag(bytes) {{")?;
+            self.oneofs[0].write_match_tag(w, desc, config, Some(&self.name))?;
+            writeln!(w, "                Ok(t) => {{ r.read_unknown(bytes, t)?; }}")?;
+            writeln!(w, "                Err(e) => return Err(e),")?;
+            writeln!(w, "            }}")?;
+            writeln!(w, "        }}")?;
         } else {
-            writeln!(w, "        let mut msg = {} {{", self.name)?;
-            for f in unregular_defaults {
-                writeln!(w, "            {}: {},", f.name, f.default.as_ref().unwrap())?;
+            let unregular_defaults = self.fields.iter().filter(|f| !f.has_regular_default(desc)).collect::<Vec<_>>();
+            if unregular_defaults.is_empty() {
+                writeln!(w, "        let mut msg = Self::default();")?;
+            } else {
+                writeln!(w, "        let mut msg = {} {{", self.name)?;
+                for f in unregular_defaults {
+                    writeln!(w, "            {}: {},", f.name, f.default.as_ref().unwrap())?;
+                }
+                writeln!(w, "            ..Self::default()")?;
+                writeln!(w, "        }};")?;
             }
-            writeln!(w, "            ..Self::default()")?;
-            writeln!(w, "        }};")?;
+            writeln!(w, "        while !r.is_eof() {{")?;
+            writeln!(w, "            match r.next_tag(bytes) {{")?;
+            for f in &self.fields {
+                f.write_match_tag(w, desc, config)?;
+            }
+            for o in &self.oneofs {
+                o.write_match_tag(w, desc, config, None)?;
+            }
+            writeln!(w, "                Ok(t) => {{ r.read_unknown(bytes, t)?; }}")?;
+            writeln!(w, "                Err(e) => return Err(e),")?;
+            writeln!(w, "            }}")?;
+            writeln!(w, "        }}")?;
         }
-        writeln!(w, "        while !r.is_eof() {{")?;
-        writeln!(w, "            match r.next_tag(bytes) {{")?;
-        for f in &self.fields {
-            f.write_match_tag(w, desc, config)?;
-        }
-        for o in &self.oneofs {
-            o.write_match_tag(w, desc, config)?;
-        }
-        writeln!(w, "                Ok(t) => {{ r.read_unknown(bytes, t)?; }}")?;
-        writeln!(w, "                Err(e) => return Err(e),")?;
-        writeln!(w, "            }}")?;
-        writeln!(w, "        }}")?;
         writeln!(w, "        Ok(msg)")?;
         writeln!(w, "    }}")?;
         writeln!(w, "}}")?;
@@ -809,11 +827,15 @@ impl Message {
     fn write_get_size<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
         writeln!(w, "    fn get_size(&self) -> usize {{")?;
         writeln!(w, "        0")?;
-        for f in &self.fields {
-            f.write_get_size(w, desc, config)?;
-        }
-        for o in self.oneofs.iter() {
-            o.write_get_size(w, desc, config)?;
+        if self.fields.is_empty() && self.oneofs.len() == 1 {
+            self.oneofs[0].write_get_size(w, desc, config, Some(&self.name))?;
+        } else {
+            for f in &self.fields {
+                f.write_get_size(w, desc, config)?;
+            }
+            for o in self.oneofs.iter() {
+                o.write_get_size(w, desc, config, None)?;
+            }
         }
         writeln!(w, "    }}")?;
         Ok(())
@@ -821,11 +843,15 @@ impl Message {
 
     fn write_write_message<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
         writeln!(w, "    fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> Result<()> {{")?;
-        for f in &self.fields {
-            f.write_write(w, desc, config)?;
-        }
-        for o in &self.oneofs {
-            o.write_write(w, desc, config)?;
+        if self.fields.is_empty() && self.oneofs.len() == 1 {
+            self.oneofs[0].write_write(w, desc, config, Some(&self.name))?;
+        } else {
+            for f in &self.fields {
+                f.write_write(w, desc, config)?;
+            }
+            for o in &self.oneofs {
+                o.write_write(w, desc, config, None)?;
+            }
         }
         writeln!(w, "        Ok(())")?;
         writeln!(w, "    }}")?;
@@ -1112,20 +1138,22 @@ impl OneOf {
         get_modules(&self.module, self.imported, desc)
     }
 
-    fn write<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
+    fn write<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config, subsuming_message: Option<&String>) -> Result<()> {
         writeln!(w)?;
-        self.write_definition(w, desc, config)?;
+        self.write_definition(w, desc, config, subsuming_message)?;
         writeln!(w)?;
-        self.write_impl_default(w, desc)?;
+        self.write_impl_default(w, desc, subsuming_message)?;
         Ok(())
     }
 
-    fn write_definition<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
+    fn write_definition<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config, subsuming_message: Option<&String>) -> Result<()> {
+        let mangled_name = format!("OneOf{}", self.name);
+        let mangled_name = subsuming_message.unwrap_or(&mangled_name);
         writeln!(w, "#[derive(Debug, PartialEq, Clone)]")?;
         if self.has_lifetime(desc) {
-            writeln!(w, "pub enum OneOf{}<'a> {{", self.name)?;
+            writeln!(w, "pub enum {}<'a> {{", mangled_name)?;
         } else {
-            writeln!(w, "pub enum OneOf{} {{", self.name)?;
+            writeln!(w, "pub enum {} {{", mangled_name)?;
         }
         for f in &self.fields {
             if f.deprecated {
@@ -1143,13 +1171,15 @@ impl OneOf {
         writeln!(w, "}}")?;
 
         if cfg!(feature = "generateImplFromForEnums") {
-            self.generate_impl_from_for_enums(w, desc, config)
+            self.generate_impl_from_for_enums(w, desc, config, subsuming_message)
         } else {
             Ok(())
         }
     }
 
-    fn generate_impl_from_for_enums<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
+    fn generate_impl_from_for_enums<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config, subsuming_message: Option<&String>) -> Result<()> {
+        let mangled_name = format!("OneOf{}", self.name);
+        let mangled_name = subsuming_message.unwrap_or(&mangled_name);
         // For the first of each enumeration type, generate an impl From<> for it.
         let mut handled_fields = Vec::new();
         for f in self.fields.iter().filter(|f| !f.deprecated || config.add_deprecated_fields) {
@@ -1157,9 +1187,9 @@ impl OneOf {
             if handled_fields.contains(&rust_type) {
                 continue;
             }
-            writeln!(w, "impl From<{}> for OneOf{} {{", rust_type, self.name)?; // TODO: lifetime.
-            writeln!(w, "   fn from(f: {}) -> OneOf{} {{", rust_type, self.name)?;
-            writeln!(w, "      OneOf{}::{}(f)", self.name, f.name)?;
+            writeln!(w, "impl From<{}> for {} {{", rust_type, mangled_name)?; // TODO: lifetime.
+            writeln!(w, "   fn from(f: {}) -> {} {{", rust_type, mangled_name)?;
+            writeln!(w, "      {}::{}(f)", mangled_name, f.name)?;
             writeln!(w, "   }}")?;
             writeln!(w, "}}")?;
 
@@ -1169,14 +1199,16 @@ impl OneOf {
         Ok(())
     }
 
-    fn write_impl_default<W: Write>(&self, w: &mut W, desc: &FileDescriptor) -> Result<()> {
+    fn write_impl_default<W: Write>(&self, w: &mut W, desc: &FileDescriptor, subsuming_message: Option<&String>) -> Result<()> {
+        let mangled_name = format!("OneOf{}", self.name);
+        let mangled_name = subsuming_message.unwrap_or(&mangled_name);
         if self.has_lifetime(desc) {
-            writeln!(w, "impl<'a> Default for OneOf{}<'a> {{", self.name)?;
+            writeln!(w, "impl<'a> Default for {}<'a> {{", mangled_name)?;
         } else {
-            writeln!(w, "impl Default for OneOf{} {{", self.name)?;
+            writeln!(w, "impl Default for {} {{", mangled_name)?;
         }
         writeln!(w, "    fn default() -> Self {{")?;
-        writeln!(w, "        OneOf{}::None", self.name)?;
+        writeln!(w, "        {}::None", mangled_name)?;
         writeln!(w, "    }}")?;
         writeln!(w, "}}")?;
         Ok(())
@@ -1191,33 +1223,49 @@ impl OneOf {
         Ok(())
     }
 
-    fn write_match_tag<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
+    fn write_match_tag<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config, subsuming_message: Option<&String>) -> Result<()> {
         for f in self.fields.iter().filter(|f| !f.deprecated || config.add_deprecated_fields) {
             let val = f.typ.read_fn(desc)?;
-            writeln!(
-                w,
-                "                Ok({}) => msg.{} = {}OneOf{}::{}({}),",
-                f.tag(),
-                self.name,
-                self.get_modules(desc),
-                self.name,
-                f.name,
-                val
-            )?;
+            if let Some(name) = subsuming_message {
+                writeln!(
+                    w,
+                    "                Ok({}) => msg = {}::{}({}),",
+                    f.tag(),
+                    name,
+                    f.name,
+                    val
+                )?;
+            } else {
+                writeln!(
+                    w,
+                    "                Ok({}) => msg.{} = {}OneOf{}::{}({}),",
+                    f.tag(),
+                    self.name,
+                    self.get_modules(desc),
+                    self.name,
+                    f.name,
+                    val
+                )?;
+            }
         }
         Ok(())
     }
 
-    fn write_get_size<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
-        writeln!(w, "        + match self.{} {{", self.name)?;
+    fn write_get_size<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config, subsuming_message: Option<&String>) -> Result<()> {
+        let mangled_name = format!("{}OneOf{}", self.get_modules(desc), self.name);
+        let mangled_name = subsuming_message.unwrap_or(&mangled_name);
+        if subsuming_message.is_some() {
+            writeln!(w, "        + match self {{")?;
+        } else {
+            writeln!(w, "        + match self.{} {{", self.name)?;
+        }
         for f in self.fields.iter().filter(|f| !f.deprecated || config.add_deprecated_fields) {
             let tag_size = sizeof_varint(f.tag());
             if f.typ.is_fixed_size() {
                 writeln!(
                     w,
-                    "            {}OneOf{}::{}(_) => {} + {},",
-                    self.get_modules(desc),
-                    self.name,
+                    "            {}::{}(_) => {} + {},",
+                    mangled_name,
                     f.name,
                     tag_size,
                     f.typ.get_size("")
@@ -1225,34 +1273,38 @@ impl OneOf {
             } else {
                 writeln!(
                     w,
-                    "            {}OneOf{}::{}(ref m) => {} + {},",
-                    self.get_modules(desc),
-                    self.name,
+                    "            {}::{}(ref m) => {} + {},",
+                    mangled_name,
                     f.name,
                     tag_size,
                     f.typ.get_size("m")
                 )?;
             }
         }
-        writeln!(w, "            {}OneOf{}::None => 0,", self.get_modules(desc), self.name)?;
+        writeln!(w, "            {}::None => 0,", mangled_name)?;
         write!(w, "    }}")?;
         Ok(())
     }
 
-    fn write_write<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
-        write!(w, "        match self.{} {{", self.name)?;
+    fn write_write<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config, subsuming_message: Option<&String>) -> Result<()> {
+        let mangled_name = format!("{}OneOf{}", self.get_modules(desc), self.name);
+        let mangled_name = subsuming_message.unwrap_or(&mangled_name);
+        if subsuming_message.is_some() {
+            write!(w, "        match self {{")?;
+        } else {
+            write!(w, "        match self.{} {{", self.name)?;
+        }
         for f in self.fields.iter().filter(|f| !f.deprecated || config.add_deprecated_fields) {
             writeln!(
                 w,
-                "            {}OneOf{}::{}(ref m) => {{ w.write_with_tag({}, |w| w.{})? }},",
-                self.get_modules(desc),
-                self.name,
+                "            {}::{}(ref m) => {{ w.write_with_tag({}, |w| w.{})? }},",
+                mangled_name,
                 f.name,
                 f.tag(),
                 f.typ.get_write("m")
             )?;
         }
-        writeln!(w, "            {}OneOf{}::None => {{}},", self.get_modules(desc), self.name)?;
+        writeln!(w, "            {}::None => {{}},", mangled_name)?;
         write!(w, "    }}")?;
         Ok(())
     }
