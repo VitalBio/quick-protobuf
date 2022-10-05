@@ -697,7 +697,7 @@ impl Message {
             custom_struct_derive += ", ";
         }
 
-        writeln!(w, "#[derive({}Debug, Default, PartialEq, Clone)]", custom_struct_derive)?;
+        writeln!(w, "#[derive({}Debug, Default, PartialEq, Clone, defmt::Format)]", custom_struct_derive)?;
 
         if let Some(repr) = &config.custom_repr {
             writeln!(w, "#[repr({})]", repr)?;
@@ -1057,7 +1057,7 @@ impl Enumerator {
     }
 
     fn write_definition<W: Write>(&self, w: &mut W) -> Result<()> {
-        writeln!(w, "#[derive(Debug, Format, PartialEq, Eq, Clone, Copy)]")?;
+        writeln!(w, "#[derive(Debug, defmt::Format, PartialEq, Eq, Clone, Copy)]")?;
         writeln!(w, "pub enum {} {{", self.name)?;
         for &(ref f, ref number) in &self.fields {
             writeln!(w, "    {} = {},", f, number)?;
@@ -1149,7 +1149,7 @@ impl OneOf {
     fn write_definition<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config, subsuming_message: Option<&String>) -> Result<()> {
         let mangled_name = format!("OneOf{}", self.name);
         let mangled_name = subsuming_message.unwrap_or(&mangled_name);
-        writeln!(w, "#[derive(Debug, PartialEq, Clone)]")?;
+        writeln!(w, "#[derive(Debug, PartialEq, Clone, defmt::Format)]")?;
         if self.has_lifetime(desc) {
             writeln!(w, "pub enum {}<'a> {{", mangled_name)?;
         } else {
@@ -1748,10 +1748,6 @@ impl FileDescriptor {
             .any(|m| m.all_fields().any(|f| f.max_length() && f.typ == FieldType::String_))
         {
             writeln!(w, "use heapless::String;")?;
-        }
-
-        if !self.enums.is_empty() {
-            writeln!(w, "use defmt::Format;")?;
         }
 
         if self.messages.iter().all(|m| m.is_unit()) {
