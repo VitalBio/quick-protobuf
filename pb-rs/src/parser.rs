@@ -280,9 +280,22 @@ named!(
                     .map(|&(_, v)| v
                         .parse::<u32>()
                         .expect("Cannot parse (vital_options.rust).max_length value")),
+                cfg: key_vals
+                    .iter()
+                    .find(|&&(ref k, _)| &*k == "(vital_options.rust).cfg")
+                    .map(|&(_, v)| unquote_cfg_value(v).expect("Cannot parse cfg value")),
             })
     )
 );
+
+fn unquote_cfg_value(s: &str) -> Result<String, &'static str> {
+    if s.len() < 2 { return Err("cfg value too short"); }
+
+    if s.chars().nth(0) != Some('"') { return Err("cfg value doesn't start with \""); }
+    if s.chars().last() != Some('"') { return Err("cfg value doesn't end with \""); }
+
+    Ok(s[1..s.len()-1].replace("\\\"", "\""))
+}
 
 named!(
     rpc_function_declaration<RpcFunctionDeclaration>,

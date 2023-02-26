@@ -329,6 +329,7 @@ pub struct Field {
     pub packed: Option<bool>,
     pub deprecated: bool,
     pub max_length: Option<u32>,
+    pub cfg: Option<String>,
 }
 
 impl Field {
@@ -385,6 +386,9 @@ impl Field {
                 return Ok(());
             }
         }
+        if let Some(ref cfg) = self.cfg {
+            writeln!(w, "    #[cfg({})]", cfg)?;
+        }
         write!(w, "    pub {}: ", self.name)?;
         let rust_type = self.typ.rust_type(desc, self.max_length)?;
         match self.frequency {
@@ -409,6 +413,9 @@ impl Field {
 
         let val = self.typ.read_fn(desc)?;
         let name = &self.name;
+        if let Some(ref cfg) = self.cfg {
+            writeln!(w, "                #[cfg({})]", cfg)?;
+        }
         write!(w, "                Ok({}) => ", self.tag())?;
         match self.frequency {
             Frequency::Optional if desc.syntax == Syntax::Proto2 && self.default.is_none() || self.typ.message().is_some() => {
@@ -432,6 +439,9 @@ impl Field {
         }
 
         write!(w, "        + ")?;
+        if let Some(ref cfg) = self.cfg {
+            write!(w, "{{ #[cfg({})] {{ ", cfg)?;
+        }
         let tag_size = sizeof_varint(self.tag());
         match self.frequency {
             Frequency::Optional if desc.syntax == Syntax::Proto2 || self.typ.message().is_some() => {
@@ -494,6 +504,9 @@ impl Field {
                 }
             }
         }
+        if let Some(ref cfg) = self.cfg {
+            writeln!(w, "}} #[cfg(not({}))] {{ 0 }} }}", cfg)?;
+        }
         Ok(())
     }
 
@@ -502,6 +515,9 @@ impl Field {
             return Ok(());
         }
 
+        if let Some(ref cfg) = self.cfg {
+            writeln!(w, "        #[cfg({})]", cfg)?;
+        }
         match self.frequency {
             Frequency::Optional if desc.syntax == Syntax::Proto2 || self.typ.message().is_some() => match self.default.as_ref() {
                 None => {
@@ -776,6 +792,9 @@ impl Message {
             } else {
                 writeln!(w, "        let mut msg = {} {{", self.name)?;
                 for f in unregular_defaults {
+                    if let Some(ref cfg) = f.cfg {
+                        writeln!(w, "            #[cfg({})]", cfg)?;
+                    }
                     writeln!(w, "            {}: {},", f.name, f.default.as_ref().unwrap())?;
                 }
                 writeln!(w, "            ..Self::default()")?;
@@ -1165,6 +1184,9 @@ impl OneOf {
             }
 
             let rust_type = f.typ.rust_type(desc, f.max_length)?;
+            if let Some(ref cfg) = f.cfg {
+                writeln!(w, "    #[cfg({})]", cfg)?;
+            }
             writeln!(w, "    {}({}),", f.name, rust_type)?;
         }
         writeln!(w, "    None,")?;
@@ -1226,6 +1248,9 @@ impl OneOf {
     fn write_match_tag<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config, subsuming_message: Option<&String>) -> Result<()> {
         for f in self.fields.iter().filter(|f| !f.deprecated || config.add_deprecated_fields) {
             let val = f.typ.read_fn(desc)?;
+            if let Some(ref cfg) = f.cfg {
+                writeln!(w, "                #[cfg({})]", cfg)?;
+            }
             if let Some(name) = subsuming_message {
                 writeln!(
                     w,
@@ -1261,6 +1286,9 @@ impl OneOf {
         }
         for f in self.fields.iter().filter(|f| !f.deprecated || config.add_deprecated_fields) {
             let tag_size = sizeof_varint(f.tag());
+            if let Some(ref cfg) = f.cfg {
+                writeln!(w, "            #[cfg({})]", cfg)?;
+            }
             if f.typ.is_fixed_size() {
                 writeln!(
                     w,
@@ -1295,6 +1323,9 @@ impl OneOf {
             write!(w, "        match self.{} {{", self.name)?;
         }
         for f in self.fields.iter().filter(|f| !f.deprecated || config.add_deprecated_fields) {
+            if let Some(ref cfg) = f.cfg {
+                writeln!(w, "            #[cfg({})]", cfg)?;
+            }
             writeln!(
                 w,
                 "            {}::{}(ref m) => {{ w.write_with_tag({}, |w| w.{})? }},",
