@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -878,7 +879,13 @@ impl Message {
     }
 
     fn sanity_checks(&self, desc: &FileDescriptor) -> Result<()> {
+        let mut fields_by_number: BTreeMap<i32, Vec<&str>> = BTreeMap::new();
         for f in self.all_fields() {
+            fields_by_number
+                .entry(f.number)
+                .and_modify(|v| v.push(&*f.name))
+                .or_insert_with(|| vec![&*f.name]);
+
             // check reserved
             if self.reserved_names.as_ref().map_or(false, |names| names.contains(&f.name))
                 || self.reserved_nums.as_ref().map_or(false, |nums| nums.contains(&f.number))
@@ -904,7 +911,20 @@ impl Message {
                 }
             }
         }
-        Ok(())
+
+        let conflict_fields: BTreeMap<i32, Vec<&str>> = fields_by_number
+            .into_iter()
+            .filter(|(_, v)| v.len() > 1)
+            .collect();
+        if !conflict_fields.is_empty() {
+            let mut message = format!("Error in mesage {}\n", self.name);
+            for (number, names) in conflict_fields.into_iter() {
+                writeln!(message, "    Duplicate field number {} used by fields {}", number, names.join(", ")).unwrap();
+            }
+            Err(Error::InvalidMessage(message))
+        } else {
+            Ok(())
+        }
     }
 
     fn set_package(&mut self, package: &str, module: &str) {
