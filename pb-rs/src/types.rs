@@ -917,7 +917,7 @@ impl Message {
             .filter(|(_, v)| v.len() > 1)
             .collect();
         if !conflict_fields.is_empty() {
-            let mut message = format!("Error in mesage {}\n", self.name);
+            let mut message = format!("Error in message {}\n", self.name);
             for (number, names) in conflict_fields.into_iter() {
                 writeln!(message, "    Duplicate field number {} used by fields {}", number, names.join(", ")).unwrap();
             }
