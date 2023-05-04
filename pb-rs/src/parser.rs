@@ -283,16 +283,18 @@ named!(
                 cfg: key_vals
                     .iter()
                     .find(|&&(ref k, _)| &*k == "(vital_options.rust).cfg")
-                    .map(|&(_, v)| unquote_cfg_value(v).expect("Cannot parse cfg value")),
+                    .map(|&(_, v)| transform_cfg_value(v).expect("Cannot parse cfg value")),
             })
     )
 );
 
-fn unquote_cfg_value(s: &str) -> Result<String, &'static str> {
+fn transform_cfg_value(s: &str) -> Result<String, &'static str> {
     if s.len() < 2 { return Err("cfg value too short"); }
 
     if s.chars().nth(0) != Some('"') { return Err("cfg value doesn't start with \""); }
     if s.chars().last() != Some('"') { return Err("cfg value doesn't end with \""); }
+
+    let s = s.replace("<COMMA>", ",");
 
     Ok(s[1..s.len()-1].replace("\\\"", "\""))
 }
