@@ -422,9 +422,6 @@ impl Field {
             Frequency::Optional if desc.syntax == Syntax::Proto2 && self.default.is_none() || self.typ.message().is_some() => {
                 writeln!(w, "msg.{} = Some({}),", name, val)?
             }
-            Frequency::Repeated if self.packed() && self.typ.is_fixed_size() => {
-                writeln!(w, "msg.{} = r.read_packed_fixed(bytes)?.into(),", name)?;
-            }
             Frequency::Repeated if self.packed() => {
                 writeln!(w, "msg.{} = r.read_packed(bytes, |r, bytes| Ok({}))?,", name, val)?;
             }
