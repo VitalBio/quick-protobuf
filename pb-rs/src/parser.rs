@@ -51,6 +51,11 @@ named!(
     do_parse!(tag!("/*") >> take_until_and_consume!("*/") >> ())
 );
 
+named!(
+    string<()>,
+    do_parse!(tag!("\"") >> take_until_and_consume!("\"") >> ())
+);
+
 // word break: multispace or comment
 named!(
     br<()>,
@@ -459,7 +464,7 @@ named!(
 
 named!(
     option_ignore<()>,
-    do_parse!(tag!("option") >> many1!(br) >> take_until_and_consume!(";") >> ())
+    do_parse!(tag!("option") >> many1!(br) >> take_until_and_consume!("=") >> many1!(br) >> many0!(string) >> take_until_and_consume!(";") >> ())
 );
 
 enum Event {
