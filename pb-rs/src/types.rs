@@ -521,7 +521,7 @@ impl Field {
                 None => {
                     writeln!(
                         w,
-                        "        if let Some(ref s) = \
+                        "        if let Some(s) = \
                              self.{} {{ w.write_with_tag({}, |w| w.{})?; }}",
                         self.name,
                         self.tag(),
@@ -1318,7 +1318,7 @@ impl OneOf {
             } else {
                 writeln!(
                     w,
-                    "            {}::{}(ref m) => {} + {},",
+                    "            {}::{}(m) => {} + {},",
                     mangled_name,
                     f.name,
                     tag_size,
@@ -1345,7 +1345,7 @@ impl OneOf {
             }
             writeln!(
                 w,
-                "            {}::{}(ref m) => {{ w.write_with_tag({}, |w| w.{})? }},",
+                "            {}::{}(m) => {{ w.write_with_tag({}, |w| w.{})? }},",
                 mangled_name,
                 f.name,
                 f.tag(),
