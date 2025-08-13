@@ -21,7 +21,7 @@ named!(
     ))
 );
 named!(
-    word_ref<&str>,
+    word_ref<&'a str>,
     map_res!(take_while!(is_word), str::from_utf8)
 );
 
@@ -171,7 +171,7 @@ named!(
 );
 
 named!(
-    key_vals<Vec<(String, &str)>>,
+    key_vals<Vec<(String, &'a str)>>,
     do_parse!(
         vec_opt: opt!(
             delimited!(
@@ -184,7 +184,7 @@ named!(
 );
 
 named!(
-    key_val<(String, &str)>,
+    key_val<(String, &'a str)>,
     do_parse!(
         many0!(br)
         >> key: option_key

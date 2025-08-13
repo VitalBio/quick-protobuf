@@ -1318,7 +1318,7 @@ impl OneOf {
             } else {
                 writeln!(
                     w,
-                    "            {}::{}(ref m) => {} + {},",
+                    "            {}::{}(m) => {} + {},",
                     mangled_name,
                     f.name,
                     tag_size,
@@ -1327,7 +1327,7 @@ impl OneOf {
             }
         }
         writeln!(w, "            {}::None => 0,", mangled_name)?;
-        write!(w, "    }}")?;
+        writeln!(w, "        }}")?;
         Ok(())
     }
 
@@ -1335,9 +1335,9 @@ impl OneOf {
         let mangled_name = format!("{}OneOf{}", self.get_modules(desc), self.name);
         let mangled_name = subsuming_message.unwrap_or(&mangled_name);
         if subsuming_message.is_some() {
-            write!(w, "        match self {{")?;
+            writeln!(w, "        match self {{")?;
         } else {
-            write!(w, "        match self.{} {{", self.name)?;
+            writeln!(w, "        match self.{} {{", self.name)?;
         }
         for f in self.fields.iter().filter(|f| !f.deprecated || config.add_deprecated_fields) {
             if let Some(ref cfg) = f.cfg {
@@ -1345,7 +1345,7 @@ impl OneOf {
             }
             writeln!(
                 w,
-                "            {}::{}(ref m) => {{ w.write_with_tag({}, |w| w.{})? }},",
+                "            {}::{}(m) => {{ w.write_with_tag({}, |w| w.{})? }},",
                 mangled_name,
                 f.name,
                 f.tag(),
@@ -1353,7 +1353,7 @@ impl OneOf {
             )?;
         }
         writeln!(w, "            {}::None => {{}},", mangled_name)?;
-        write!(w, "    }}")?;
+        writeln!(w, "        }}")?;
         Ok(())
     }
 }
@@ -1472,7 +1472,7 @@ impl FileDescriptor {
             reader.read_to_end(&mut buf)?;
         }
         let mut desc = file_descriptor(&buf).to_result().map_err(Error::Nom)?;
-        for mut m in &mut desc.messages {
+        for m in &mut desc.messages {
             if m.path.as_os_str().is_empty() {
                 m.path = in_file.to_path_buf();
                 if !import_search_path.is_empty() {
