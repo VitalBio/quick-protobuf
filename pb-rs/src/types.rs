@@ -1465,6 +1465,8 @@ impl FileDescriptor {
 
     /// Opens a proto file, reads it and returns raw parsed data
     pub fn read_proto(in_file: &Path, import_search_path: &[PathBuf]) -> Result<FileDescriptor> {
+        println!("Working on file: {}", in_file.display());
+
         let file = std::fs::read_to_string(in_file)?;
         let (_, mut desc) = file_descriptor(&file).map_err(|e| Error::Nom(e))?;
         for m in &mut desc.messages {

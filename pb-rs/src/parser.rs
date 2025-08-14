@@ -9,8 +9,8 @@ use crate::types::{
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_until},
-    character::complete::{alphanumeric1, digit1, hex_digit1, line_ending, multispace1},
-    combinator::{map, map_res, not, opt, recognize, value},
+    character::complete::{alpha1, alphanumeric1, digit1, hex_digit1, multispace1, not_line_ending},
+    combinator::{map, map_res, opt, recognize, value, verify},
     multi::{many0, many1, separated_list0, separated_list1},
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
@@ -38,8 +38,28 @@ enum Event {
     Ignore,
 }
 
+fn qualifiable_name(input: &str) -> IResult<&str, String> {
+    map(
+        verify(
+            recognize(pair(opt(tag(".")), separated_list1(tag("."), word))),
+            |s: &str| !s.ends_with('.') && !s.contains(".."),
+        ),
+        std::borrow::ToOwned::to_owned,
+    )(input)
+}
+
 fn word_ref(input: &str) -> IResult<&str, &str> {
-    recognize(many0(alt((alphanumeric1, tag("_"), tag(".")))))(input)
+    recognize(pair(
+        alt((
+            // I would really rather just take in 1 alphabetic
+            // character, but just using `alpha1()` is also technically
+            // correct for our use case and is simpler to implement in
+            // nom apparently
+            alpha1,
+            tag("_"),
+        )),
+        many0(alt((alphanumeric1, tag("_")))),
+    ))(input)
 }
 
 fn word(input: &str) -> IResult<&str, String> {
@@ -58,10 +78,7 @@ fn integer(input: &str) -> IResult<&str, i32> {
 }
 
 fn comment(input: &str) -> IResult<&str, ()> {
-    value(
-        (),
-        tuple((tag("//"), many0(not(line_ending)), opt(line_ending))),
-    )(input)
+    value((), pair(tag("//"), not_line_ending))(input)
 }
 
 fn block_comment(input: &str) -> IResult<&str, ()> {
@@ -77,7 +94,10 @@ fn string(input: &str) -> IResult<&str, String> {
 
 // word break: multispace or comment
 fn br(input: &str) -> IResult<&str, ()> {
-    alt((value((), multispace1), comment, block_comment))(input)
+    value(
+        (),
+        many1(alt((value((), multispace1), comment, block_comment))),
+    )(input)
 }
 
 fn syntax(input: &str) -> IResult<&str, Syntax> {
@@ -102,7 +122,7 @@ fn import(input: &str) -> IResult<&str, PathBuf> {
 fn package(input: &str) -> IResult<&str, String> {
     delimited(
         pair(tag("package"), many1(br)),
-        word,
+        qualifiable_name,
         pair(many0(br), tag(";")),
     )(input)
 }
@@ -231,7 +251,7 @@ fn field_type(input: &str) -> IResult<&str, FieldType> {
         value(FieldType::Bytes_, tag("bytes")),
         value(FieldType::Float, tag("float")),
         value(FieldType::Double, tag("double")),
-        map(word, |w| FieldType::MessageOrEnum(w)),
+        map(qualifiable_name, |w| FieldType::MessageOrEnum(w)),
     ))(input)
 }
 
@@ -401,11 +421,7 @@ fn message(input: &str) -> IResult<&str, Message> {
         terminated(
             pair(
                 delimited(pair(tag("message"), many1(br)), word, many0(br)),
-                delimited(
-                    tag("{"),
-                    many0(delimited(many0(br), message_event, many0(br))),
-                    tag("}"),
-                ),
+                delimited(tag("{"), many0(message_event), tag("}")),
             ),
             opt(pair(many0(br), tag(";"))),
         ),
@@ -460,11 +476,23 @@ fn enumerator(input: &str) -> IResult<&str, Enumerator> {
 }
 
 fn option_ignore(input: &str) -> IResult<&str, ()> {
-    value((), delimited(tag("option"), take_until(";"), tag(";")))(input)
+    value(
+        (),
+        tuple((
+            tag("option"),
+            many1(br),
+            take_until("="),
+            tag("="),
+            many1(br),
+            many0(string),
+            take_until(";"),
+            tag(";"),
+        )),
+    )(input)
 }
 
 pub fn file_descriptor(input: &str) -> IResult<&str, FileDescriptor, nom::error::Error<String>> {
-    map(
+    let mut parser = map(
         many0(alt((
             map(syntax, |s| Event::Syntax(s)),
             map(import, |i| Event::Import(i)),
@@ -477,6 +505,7 @@ pub fn file_descriptor(input: &str) -> IResult<&str, FileDescriptor, nom::error:
         ))),
         |events| {
             let mut desc = FileDescriptor::default();
+            println!("    Events: {:?}", events);
             for event in events {
                 match event {
                     Event::Syntax(s) => desc.syntax = s,
@@ -490,8 +519,16 @@ pub fn file_descriptor(input: &str) -> IResult<&str, FileDescriptor, nom::error:
             }
             desc
         },
-    )(input)
-    .map_err(|e: nom::Err<nom::error::Error<&str>>| e.to_owned())
+    );
+
+    let (unparsed, desc) = parser(input).map_err(|e: nom::Err<nom::error::Error<&str>>| e.to_owned())?;
+
+    if !unparsed.is_empty() {
+        eprintln!("Parsing failed at:\n{}...\nIs there a syntax error?", unparsed.chars().take(50).collect::<String>());
+        let e: nom::error::Error<String> = nom::error::make_error(unparsed.to_owned(), nom::error::ErrorKind::Eof);
+        return Err(nom::Err::Failure(e));
+    }
+    Ok(("", desc))
 }
 
 #[cfg(test)]
@@ -547,6 +584,51 @@ mod test {
     }
 
     #[test]
+    fn test_comments() {
+        assert_eq!("\nb", comment("// BOOM\nb").unwrap().0);
+        assert_eq!("\nb", comment("//\nb").unwrap().0);
+        assert_eq!("\nb", block_comment("/* BOOM */\nb").unwrap().0);
+        let msg = r#"
+            // BOOM
+            /* BOOM */
+            package foo.bar;
+            // BOOM
+            /* BOOM */
+            message A {
+                // BOOM
+                enum E1 {
+                    // BOOM
+                    // BOOM
+                    V1 = 1;
+                    // BOOM
+                    v2 = 2;
+                }
+                // BOOM
+                enum E2 {
+                    // BOOM
+                }
+                enum E3 { /* BOOM */ }
+                // BOOM
+                message B {
+                    // BOOM
+                    // BOOM
+                    optional string b = 1;
+                }
+                message C {
+                    // BOOM
+                }
+                message D { /* BOOM */ }
+                required string a = 1;
+            }
+            "#;
+        let desc = file_descriptor(msg).unwrap().1;
+        assert_eq!("foo.bar".to_string(), desc.package);
+        assert_eq!(1, desc.messages.len());
+        assert_eq!(3, desc.messages[0].messages.len());
+        assert_eq!(3, desc.messages[0].enums.len());
+    }
+
+    #[test]
     fn test_import() {
         let msg = r#"syntax = "proto3";
 
@@ -586,13 +668,16 @@ mod test {
             repeated int32 a = 1;
             optional string b = 2;
         }
-        optional b = 1;
+        message C {
+        }
+        message D {}
+        optional int32 b = 1;
     }"#;
 
-        let mess = message(msg);
-        if let ::nom::IResult::Ok((_, mess)) = mess {
-            assert!(mess.messages.len() == 1);
-        }
+        let desc = file_descriptor(msg).unwrap().1;
+        dbg!(&desc);
+        assert_eq!(1, desc.messages.len());
+        assert_eq!(3, desc.messages[0].messages.len());
     }
 
     #[test]
