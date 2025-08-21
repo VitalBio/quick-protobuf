@@ -6,7 +6,9 @@ pub enum Error {
     /// IO error
     Io(io::Error),
     /// Nom Error
-    Nom(::nom::simple_errors::Err),
+    Nom(nom::Err<nom::error::Error<String>>),
+    /// Nom's other failure case; giving up in the middle of a file
+    TrailingGarbage(String),
     /// No .proto file provided
     NoProto,
     /// Cannot read input file
@@ -61,6 +63,7 @@ impl std::fmt::Display for Error {
         match self {
             Error::Io(e) => write!(f, "{}", e),
             Error::Nom(e) => write!(f, "{}", e),
+            Error::TrailingGarbage(s) => write!(f, "parsing abandoned near: {:?}", s),
             Error::NoProto => write!(f, "No .proto file provided"),
             Error::InputFile(file) => write!(f, "Cannot read input file '{}'", file),
             Error::OutputFile(file) => write!(f, "Cannot read output file '{}'", file),
