@@ -775,6 +775,7 @@ impl Message {
         }
 
         if self.fields.is_empty() && self.oneofs.len() == 1 {
+            writeln!(w, "        #[allow(unused)]")?;
             writeln!(w, "        let mut msg = Self::default();")?;
             writeln!(w, "        while !r.is_eof() {{")?;
             writeln!(w, "            match r.next_tag(bytes) {{")?;
@@ -786,6 +787,7 @@ impl Message {
         } else {
             let unregular_defaults = self.fields.iter().filter(|f| !f.has_regular_default(desc)).collect::<Vec<_>>();
             if unregular_defaults.is_empty() {
+                writeln!(w, "        #[allow(unused)]")?;
                 writeln!(w, "        let mut msg = Self::default();")?;
             } else {
                 writeln!(w, "        let mut msg = {} {{", self.name)?;
@@ -859,6 +861,7 @@ impl Message {
     }
 
     fn write_write_message<W: Write>(&self, w: &mut W, desc: &FileDescriptor, config: &Config) -> Result<()> {
+        writeln!(w, "    #[allow(unused)]")?;
         writeln!(w, "    fn write_message<W: WriterBackend>(&self, w: &mut Writer<W>) -> Result<()> {{")?;
         if self.fields.is_empty() && self.oneofs.len() == 1 {
             self.oneofs[0].write_write(w, desc, config, Some(&self.name))?;
